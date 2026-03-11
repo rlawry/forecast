@@ -1,0 +1,234 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>NWS forecast station model</title>
+<style>
+  body{
+    margin:0;
+    min-height:100vh;
+    display:grid;
+    place-items:center;
+    background:#fff;
+    font-family:Arial,sans-serif;
+  }
+  .wrap{
+    width:360px;
+    text-align:center;
+  }
+  svg{
+    width:320px;
+    height:260px;
+  }
+  text{
+    font:24px Arial,sans-serif;
+    fill:#000;
+  }
+  input[type="range"]{
+    width:100%;
+    margin-top:8px;
+  }
+  .labels{
+    display:grid;
+    grid-template-columns:1fr 1fr 1fr;
+    gap:8px;
+    margin-top:6px;
+    font-size:12px;
+  }
+  .labels span:nth-child(1){text-align:left}
+  .labels span:nth-child(2){text-align:center}
+  .labels span:nth-child(3){text-align:right}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <svg id="station" viewBox="0 0 320 260" aria-label="Forecast station model"></svg>
+  <input id="timeSlider" type="range">
+  <div class="labels">
+    <span id="startLabel"></span>
+    <span id="selectedLabel"></span>
+    <span id="endLabel"></span>
+  </div>
+</div>
+
+<script>
+let hourlyForecast = null;
+let gridForecast = null;
+
+const lat = 43.0481, lon = -76.1474; // change these
+const $ = id => document.getElementById(id);
+const station = $("station");
+const slider = $("timeSlider");
+const startLabel = $("startLabel");
+const selectedLabel = $("selectedLabel");
+const endLabel = $("endLabel");
+
+const dirMap = {
+  N:0, NNE:22.5, NE:45, ENE:67.5, E:90, ESE:112.5, SE:135, SSE:157.5,
+  S:180, SSW:202.5, SW:225, WSW:247.5, W:270, WNW:292.5, NW:315, NNW:337.5
+};
+
+function fmt(t){
+  return new Date(+t).toLocaleString([], {month:"short", day:"numeric", hour:"numeric"});
+}
+function cToF(c){
+  return c == null ? null : Math.round(c * 9 / 5 + 32);
+}
+function msToKt(ms){
+  return ms == null ? null : Math.round(ms * 1.94384);
+}
+function degFromCardinal(s){
+  return dirMap[s] ?? 0;
+}
+function parseSpeedKt(s){
+  const nums = String(s || "").match(/\d+(\.\d+)?/g)?.map(Number) || [];
+  if (!nums.length) return 0;
+  return Math.round((nums.reduce((a,b)=>a+b,0) / nums.length) * 0.868976);
+}
+function parseDurationMs(d){
+  const m = String(d).match(/^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?)?$/);
+  if (!m) return 0;
+  return ((+m[1]||0)*86400000) + ((+m[2]||0)*3600000) + ((+m[3]||0)*60000);
+}
+function gridLayer(...names){
+  for (const n of names) if (gridForecast?.properties?.[n]) return gridForecast.properties[n];
+  return null;
+}
+function gridValue(layer, t){
+  const vals = layer?.values;
+  if (!vals?.length) return null;
+  let best = null, bestDiff = Infinity;
+  for (const v of vals){
+    if (v.value == null) continue;
+    const [start, dur="PT0H"] = v.validTime.split("/");
+    const s = Date.parse(start), e = s + parseDurationMs(dur);
+    if (t >= s && t < e) return v.value;
+    const diff = Math.abs(s - t);
+    if (diff < bestDiff){ bestDiff = diff; best = v.value; }
+  }
+  return best;
+}
+function nearestPeriod(t){
+  const periods = hourlyForecast.properties.periods;
+  let best = periods[0], bestDiff = Infinity;
+  for (const p of periods){
+    const diff = Math.abs(Date.parse(p.startTime) - t);
+    if (diff < bestDiff){ bestDiff = diff; best = p; }
+  }
+  return best;
+}
+function dewpointFromTRH(tempF, rh){
+  if (tempF == null || rh == null) return null;
+  const t = (tempF - 32) * 5 / 9;
+  const a = 17.625, b = 243.04;
+  const g = Math.log(rh / 100) + (a * t) / (b + t);
+  return Math.round((((b * g) / (a - g)) * 9 / 5) + 32);
+}
+function pressureCode(v){
+  if (v == null) return "---";
+  const hPa = v > 2000 ? v / 100 : v;
+  return String(Math.round(hPa * 10)).slice(-3).padStart(3, "0");
+}
+function weatherCode(text){
+  text = String(text || "").toUpperCase();
+  if (text.includes("THUNDER")) return "TS";
+  if (text.includes("FREEZING RAIN")) return "FZRA";
+  if (text.includes("SLEET") || text.includes("ICE PELLETS")) return "PL";
+  if (text.includes("SNOW") || text.includes("FLURRIES")) return "SN";
+  if (text.includes("RAIN") || text.includes("SHOWERS") || text.includes("DRIZZLE")) return "RA";
+  if (text.includes("FOG") || text.includes("MIST")) return "FG";
+  return "";
+}
+function skyCoverPct(period, t){
+  const v = gridValue(gridLayer("skyCover"), t);
+  if (v != null) return v;
+  const text = String(period.shortForecast || "").toUpperCase();
+  if (text.includes("OVERCAST") || text.includes("CLOUDY")) return 100;
+  if (text.includes("MOSTLY CLOUDY")) return 75;
+  if (text.includes("PARTLY CLOUDY")) return 50;
+  if (text.includes("MOSTLY SUNNY")) return 25;
+  if (text.includes("SUNNY") || text.includes("CLEAR")) return 0;
+  return 0;
+}
+function skySvg(p){
+  const open = '<circle cx="160" cy="130" r="18" fill="#fff" stroke="#000" stroke-width="3"/>';
+  if (p >= 87) return '<circle cx="160" cy="130" r="18" fill="#000" stroke="#000" stroke-width="3"/>';
+  if (p >= 62) return '<circle cx="160" cy="130" r="18" fill="#000"/><path d="M160 130 L160 112 A18 18 0 0 1 178 130 Z" fill="#fff"/><circle cx="160" cy="130" r="18" fill="none" stroke="#000" stroke-width="3"/>';
+  if (p >= 37) return '<path d="M160 112 A18 18 0 0 1 160 148 L160 130 Z" fill="#000"/><circle cx="160" cy="130" r="18" fill="none" stroke="#000" stroke-width="3"/>';
+  if (p >= 12) return open + '<path d="M160 130 L160 112 A18 18 0 0 1 178 130 Z" fill="#000"/>';
+  return open;
+}
+function windSvg(dir, kt){
+  if (!kt) return '<circle cx="160" cy="130" r="2" fill="#000"/>';
+  let rem = Math.round(kt / 5) * 5, y = 70;
+  let s = `<g transform="rotate(${dir} 160 130)" stroke="#000" stroke-width="3" fill="#000" stroke-linecap="round"><line x1="160" y1="130" x2="160" y2="70"/>`;
+  while (rem >= 50){ s += `<polygon points="160,${y} 182,${y+6} 160,${y+12}"/>`; y += 12; rem -= 50; }
+  while (rem >= 10){ s += `<line x1="160" y1="${y}" x2="180" y2="${y+8}"/>`; y += 10; rem -= 10; }
+  if (rem >= 5) s += `<line x1="160" y1="${y}" x2="172" y2="${y+5}"/>`;
+  return s + `</g>`;
+}
+function render(t){
+  const p = nearestPeriod(t);
+
+  const temp = p.temperature ?? cToF(gridValue(gridLayer("temperature"), t));
+  const rh = p.relativeHumidity?.value ?? gridValue(gridLayer("relativeHumidity"), t);
+  const dpC = p.dewpoint?.value ?? gridValue(gridLayer("dewpoint"), t);
+  const dew = dpC != null ? cToF(dpC) : dewpointFromTRH(temp, rh);
+  const windKt = msToKt(gridValue(gridLayer("windSpeed"), t)) ?? parseSpeedKt(p.windSpeed);
+  const windDir = gridValue(gridLayer("windDirection"), t) ?? degFromCardinal(p.windDirection);
+  const slp = pressureCode(gridValue(gridLayer("seaLevelPressure","barometricPressure","pressure","pressureReducedToMeanSeaLevel"), t));
+  const wx = weatherCode(p.shortForecast);
+  const visM = gridValue(gridLayer("visibility"), t);
+  const vis = visM == null ? "" : (visM / 1609.344).toFixed(1).replace(/\.0$/,"");
+  const pop = p.probabilityOfPrecipitation?.value;
+  const sky = skyCoverPct(p, t);
+
+  selectedLabel.textContent = fmt(Date.parse(p.startTime));
+
+  station.innerHTML = `
+    <text x="70"  y="95">${temp ?? ""}</text>
+    <text x="70"  y="215">${dew ?? ""}</text>
+    <text x="45"  y="145">${vis}</text>
+    <text x="210" y="95">${slp}</text>
+    <text x="104" y="145">${wx}</text>
+    <text x="210" y="145">${rh == null ? "" : Math.round(rh)}</text>
+    <text x="220" y="215">${pop == null ? "" : pop}</text>
+    ${skySvg(sky)}
+    ${windSvg(windDir, windKt)}
+  `;
+}
+async function load(){
+  const point = await fetch(`https://api.weather.gov/points/${lat},${lon}`, {
+    headers:{Accept:"application/geo+json"}
+  }).then(r => r.json());
+
+  const [h, g] = await Promise.all([
+    fetch(point.properties.forecastHourly,   {headers:{Accept:"application/geo+json"}}).then(r => r.json()),
+    fetch(point.properties.forecastGridData, {headers:{Accept:"application/geo+json"}}).then(r => r.json())
+  ]);
+
+  hourlyForecast = h;
+  gridForecast = g;
+
+  const periods = hourlyForecast.properties.periods;
+  const first = Date.parse(periods[0].startTime);
+  const last  = Date.parse(periods[periods.length - 1].startTime);
+
+  slider.min = first;
+  slider.max = last;
+  slider.step = 3600000;
+  slider.value = first;
+
+  startLabel.textContent = fmt(first);
+  endLabel.textContent = fmt(last);
+
+  render(first);
+}
+
+slider.addEventListener("input", e => render(+e.target.value));
+load();
+</script>
+
+</body>
+</html>
