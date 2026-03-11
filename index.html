@@ -137,11 +137,10 @@
 <script>
 let hourlyForecast = null;
 let gridForecast = null;
+let pressureSeries = [];
 let pendingLocation = null;
 let searchTimer = null;
 let searchAbort = null;
-let latestObservation = null;
-let observationStationUrl = null;
 
 const STORAGE_KEY = "nwsStationModelLocation";
 
@@ -203,12 +202,6 @@ function layerRegex(re, excludeRe){
   }
   return null;
 }
-function pressureLayer(){
-  return (
-    layer("seaLevelPressure", "pressure", "barometricPressure", "pressureReducedToMeanSeaLevel") ||
-    layerRegex(/pressure/i, /probability|tropical|hurricane|wind/i)
-  );
-}
 function qpfLayer(){
   return (
     layer("quantitativePrecipitation") ||
@@ -265,30 +258,85 @@ function dewpointFromTRH(tempF, rh){
   const g = Math.log(rh / 100) + (a * t) / (b + t);
   return Math.round((((b * g) / (a - g)) * 9 / 5) + 32);
 }
-function pressureHpa(v, u){
-  u = String(u || "");
-  if (u.includes(":Pa") || /\bPa\b/.test(u)) return v / 100;
-  if (u.includes("kPa")) return v * 10;
-  if (u.includes("hPa") || u.includes("mb")) return v;
-  if (v > 2000) return v / 100;
-  return v;
-}
-function pressureCode(v, u){
-  if (v == null) return "///";
-  const hPa = pressureHpa(v, u);
+function pressureCodeFromHpa(hPa){
+  if (hPa == null || !isFinite(hPa)) return "///";
   return String(Math.round(hPa * 10)).slice(-3).padStart(3, "0");
 }
+function inHgToHpa(inHg){
+  return inHg * 33.8638866667;
+}
+function parseDwmlPressure(xmlText){
+  const xml = new DOMParser().parseFromString(xmlText, "application/xml");
+  if (xml.querySelector("parsererror")) return [];
+
+  const layouts = {};
+  xml.querySelectorAll("time-layout").forEach(node => {
+    const key = node.querySelector("layout-key")?.textContent?.trim();
+    if (!key) return;
+
+    const starts = [...node.querySelectorAll("start-valid-time")].map(n => Date.parse(n.textContent.trim()));
+    const ends = [...node.querySelectorAll("end-valid-time")].map(n => Date.parse(n.textContent.trim()));
+
+    layouts[key] = starts.map((start, i) => ({
+      start,
+      end: Number.isFinite(ends[i]) ? ends[i] : start + 3600000
+    }));
+  });
+
+  const pressureNode = [...xml.querySelectorAll('pressure[type="barometer"]')][0];
+  if (!pressureNode) return [];
+
+  const layoutKey = pressureNode.getAttribute("time-layout");
+  const slots = layouts[layoutKey] || [];
+  const values = [...pressureNode.querySelectorAll("value")].map(v => v.textContent.trim());
+
+  return slots.map((slot, i) => {
+    const raw = values[i];
+    if (!raw || raw === "NA") return null;
+    const inHg = parseFloat(raw);
+    if (!isFinite(inHg)) return null;
+    return {
+      start: slot.start,
+      end: slot.end,
+      inHg,
+      hPa: inHgToHpa(inHg)
+    };
+  }).filter(Boolean);
+}
+function pressureHpaAt(t){
+  if (!pressureSeries.length) return null;
+
+  let nearest = null;
+  let bestDiff = Infinity;
+
+  for (const p of pressureSeries){
+    if (t >= p.start && t < p.end) return p.hPa;
+    const diff = Math.abs(p.start - t);
+    if (diff < bestDiff){
+      bestDiff = diff;
+      nearest = p.hPa;
+    }
+  }
+  return nearest;
+}
 function pressureTrend(t){
-  const pl = pressureLayer();
-  if (!pl) return {num:"", svg:""};
-  const now = gridValue(pl, t);
-  const prev = gridValue(pl, t - 3 * 3600000);
-  if (now == null || prev == null) return {num:"", svg:""};
-  const delta = pressureHpa(now, pl.uom) - pressureHpa(prev, pl.uom);
+  const now = pressureHpaAt(t);
+  const prev = pressureHpaAt(t - 3 * 3600000);
+
+  if (now == null || prev == null){
+    return {num:"", svg:""};
+  }
+
+  const delta = now - prev;
   const num = String(Math.round(Math.abs(delta) * 10));
+
   let svg = '<line x1="205" y1="140" x2="228" y2="140" stroke="#000" stroke-width="3"/>';
-  if (delta > 0.05) svg = '<polyline points="205,146 216,134 228,134" fill="none" stroke="#000" stroke-width="3"/>';
-  else if (delta < -0.05) svg = '<polyline points="205,134 216,146 228,146" fill="none" stroke="#000" stroke-width="3"/>';
+  if (delta > 0.05){
+    svg = '<polyline points="205,146 216,134 228,134" fill="none" stroke="#000" stroke-width="3"/>';
+  } else if (delta < -0.05){
+    svg = '<polyline points="205,134 216,146 228,146" fill="none" stroke="#000" stroke-width="3"/>';
+  }
+
   return {num, svg};
 }
 function precipInches3h(t){
@@ -399,11 +447,7 @@ function render(t){
   const dpt = dpC != null ? cToF(dpC) : dewpointFromTRH(temp, rh);
   const windKt = gridWindKt(t) ?? parseSpeedKt(p.windSpeed);
   const windDir = gridWindDeg(t) ?? degFromCardinal(p.windDirection) ?? 0;
-  const pl = pressureLayer();
-  const pressure =
-    gridValue(pl, t) != null
-      ? pressureCode(gridValue(pl, t), pl?.uom)
-      : observedPressureCode();
+  const pressure = pressureCodeFromHpa(pressureHpaAt(t));
   const trend = pressureTrend(t);
   const wx = weatherCode(p.shortForecast);
   const visM = gridValue(layer("visibility"), t);
@@ -476,16 +520,12 @@ async function searchAddresses(q){
   try{
     const data = await fetch(url, {
       signal: searchAbort.signal,
-      headers: {
-        "Accept": "application/json"
-      }
+      headers: { "Accept": "application/json" }
     }).then(r => r.json());
 
     showSuggestions(Array.isArray(data) ? data : []);
   }catch(e){
-    if (e.name !== "AbortError"){
-      clearSuggestions();
-    }
+    if (e.name !== "AbortError") clearSuggestions();
   }
 }
 async function loadLocation(loc){
@@ -499,25 +539,24 @@ async function loadLocation(loc){
       headers:{Accept:"application/geo+json"}
     }).then(r => r.json());
 
-    observationStationUrl = point.properties.observationStations;
+    const hourlyUrl = point.properties.forecastHourly;
+    const gridUrl = point.properties.forecastGridData;
 
-    const stations = await fetch(observationStationUrl, {
-      headers:{Accept:"application/geo+json"}
-    }).then(r => r.json());
-    
-    const firstStationUrl = stations.features?.[0]?.id;
-    
-    const [h, g, obs] = await Promise.all([
-      fetch(point.properties.forecastHourly,   {headers:{Accept:"application/geo+json"}}).then(r => r.json()),
-      fetch(point.properties.forecastGridData, {headers:{Accept:"application/geo+json"}}).then(r => r.json()),
-      firstStationUrl
-        ? fetch(`${firstStationUrl}/observations/latest`, {headers:{Accept:"application/geo+json"}}).then(r => r.json())
-        : Promise.resolve(null)
+    const [h, g, dwmlText] = await Promise.all([
+      fetch(hourlyUrl, {
+        headers:{Accept:"application/geo+json"}
+      }).then(r => r.json()),
+      fetch(gridUrl, {
+        headers:{Accept:"application/geo+json"}
+      }).then(r => r.json()),
+      fetch(hourlyUrl, {
+        headers:{Accept:"application/vnd.noaa.dwml+xml"}
+      }).then(r => r.text())
     ]);
-    
+
     hourlyForecast = h;
     gridForecast = g;
-    latestObservation = obs;
+    pressureSeries = parseDwmlPressure(dwmlText);
 
     const periods = hourlyForecast.properties.periods;
     const first = Date.parse(periods[0].startTime);
@@ -539,18 +578,11 @@ async function loadLocation(loc){
     startLabel.textContent = "";
     selectedLabel.textContent = "";
     endLabel.textContent = "";
+    pressureSeries = [];
     setLoading("Load failed");
     searchStatus.textContent = "Could not load that location.";
   }
 }
-
-function observedPressureCode(){
-  const p = latestObservation?.properties;
-  const v = p?.seaLevelPressure?.value ?? p?.barometricPressure?.value;
-  const u = p?.seaLevelPressure?.unitCode ?? p?.barometricPressure?.unitCode;
-  return pressureCode(v, u);
-}
-  
 function initSearch(){
   addressInput.addEventListener("input", () => {
     pendingLocation = null;
