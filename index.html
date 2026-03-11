@@ -30,6 +30,9 @@
     font:24px Arial,sans-serif;
     fill:#000;
   }
+  .small{
+    font-size:18px;
+  }
   input[type="range"]{
     width:100%;
     margin-top:8px;
@@ -82,46 +85,115 @@ const dirMap = {
 function fmt(t){
   return new Date(+t).toLocaleString([], {month:"short", day:"numeric", hour:"numeric"});
 }
+
 function cToF(c){
   return c == null ? null : Math.round(c * 9 / 5 + 32);
 }
-function parseSpeedKt(s){
-  const nums = String(s || "").match(/\d+(\.\d+)?/g)?.map(Number) || [];
-  if (!nums.length) return 0;
-  return Math.round((nums.reduce((a,b)=>a+b,0) / nums.length) * 0.868976);
-}
+
 function parseDurationMs(d){
-  const m = String(d).match(/^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?)?$/);
+  const m = String(d || "").match(/^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/);
   if (!m) return 0;
-  return ((+m[1]||0)*86400000) + ((+m[2]||0)*3600000) + ((+m[3]||0)*60000);
+  return ((+m[1]||0)*86400000) + ((+m[2]||0)*3600000) + ((+m[3]||0)*60000) + ((+m[4]||0)*1000);
 }
-function gridLayer(...names){
-  for (const n of names) if (gridForecast?.properties?.[n]) return gridForecast.properties[n];
+
+function parseValidTime(vt){
+  const [start, dur="PT0H"] = String(vt || "").split("/");
+  const s = Date.parse(start);
+  const d = parseDurationMs(dur) || 3600000;
+  return {start:s, end:s+d, durationMs:d};
+}
+
+function props(){
+  return gridForecast?.properties || {};
+}
+
+function layer(...names){
+  const p = props();
+  for (const n of names){
+    if (p[n]?.values?.length) return p[n];
+  }
   return null;
 }
-function gridValue(layer, t){
-  const vals = layer?.values;
+
+function layerRegex(re, excludeRe){
+  const p = props();
+  for (const k of Object.keys(p)){
+    if (excludeRe && excludeRe.test(k)) continue;
+    if (re.test(k) && p[k]?.values?.length) return p[k];
+  }
+  return null;
+}
+
+function pressureLayer(){
+  return (
+    layer("seaLevelPressure", "pressure", "barometricPressure", "pressureReducedToMeanSeaLevel") ||
+    layerRegex(/pressure/i, /probability|tropical|hurricane|wind/i)
+  );
+}
+
+function qpfLayer(){
+  return (
+    layer("quantitativePrecipitation") ||
+    layerRegex(/quantitativePrecipitation|precip/i, /probability|snow|ice/i)
+  );
+}
+
+function gridValue(layerObj, t){
+  const vals = layerObj?.values;
   if (!vals?.length) return null;
-  let best = null, bestDiff = Infinity;
+
+  let nearest = null;
+  let bestDiff = Infinity;
+
   for (const v of vals){
     if (v.value == null) continue;
-    const [start, dur="PT0H"] = v.validTime.split("/");
-    const s = Date.parse(start), e = s + parseDurationMs(dur);
-    if (t >= s && t < e) return v.value;
-    const diff = Math.abs(s - t);
-    if (diff < bestDiff){ bestDiff = diff; best = v.value; }
+    const {start, end} = parseValidTime(v.validTime);
+    if (t >= start && t < end) return v.value;
+
+    const diff = Math.abs(start - t);
+    if (diff < bestDiff){
+      bestDiff = diff;
+      nearest = v.value;
+    }
   }
-  return best;
+  return nearest;
 }
+
+function gridIntervals(layerObj){
+  return (layerObj?.values || [])
+    .filter(v => v.value != null)
+    .map(v => {
+      const {start, end, durationMs} = parseValidTime(v.validTime);
+      return {start, end, durationMs, value:v.value};
+    });
+}
+
+function integrateLayer(layerObj, t0, t1){
+  const arr = gridIntervals(layerObj);
+  let total = 0;
+
+  for (const it of arr){
+    const overlap = Math.max(0, Math.min(t1, it.end) - Math.max(t0, it.start));
+    if (!overlap || !it.durationMs) continue;
+    total += it.value * (overlap / it.durationMs);
+  }
+
+  return total;
+}
+
 function nearestPeriod(t){
   const periods = hourlyForecast.properties.periods;
   let best = periods[0], bestDiff = Infinity;
   for (const p of periods){
     const diff = Math.abs(Date.parse(p.startTime) - t);
-    if (diff < bestDiff){ bestDiff = diff; best = p; }
+    if (diff < bestDiff){
+      bestDiff = diff;
+      best = p;
+    }
   }
   return best;
 }
+
 function dewpointFromTRH(tempF, rh){
   if (tempF == null || rh == null) return null;
   const t = (tempF - 32) * 5 / 9;
@@ -129,11 +201,59 @@ function dewpointFromTRH(tempF, rh){
   const g = Math.log(rh / 100) + (a * t) / (b + t);
   return Math.round((((b * g) / (a - g)) * 9 / 5) + 32);
 }
-function pressureCode(v){
-  if (v == null) return "---";
-  const hPa = v > 2000 ? v / 100 : v;
+
+function pressureHpa(v, u){
+  u = String(u || "");
+  if (u.includes(":Pa") || /\bPa\b/.test(u)) return v / 100;
+  if (u.includes("kPa")) return v * 10;
+  if (u.includes("hPa") || u.includes("mb")) return v;
+  if (v > 2000) return v / 100; // likely Pa
+  return v; // likely already hPa
+}
+
+function pressureCode(v, u){
+  if (v == null) return "///";
+  const hPa = pressureHpa(v, u);
   return String(Math.round(hPa * 10)).slice(-3).padStart(3, "0");
 }
+
+function pressureTrend(t){
+  const pl = pressureLayer();
+  if (!pl) return {num:"", svg:""};
+
+  const now = gridValue(pl, t);
+  const prev = gridValue(pl, t - 3 * 3600000);
+  if (now == null || prev == null) return {num:"", svg:""};
+
+  const delta = pressureHpa(now, pl.uom) - pressureHpa(prev, pl.uom);
+  const num = String(Math.round(Math.abs(delta) * 10));
+
+  let svg = '<line x1="205" y1="140" x2="228" y2="140" stroke="#000" stroke-width="3"/>';
+  if (delta > 0.05){
+    svg = '<polyline points="205,146 216,134 228,134" fill="none" stroke="#000" stroke-width="3"/>';
+  } else if (delta < -0.05){
+    svg = '<polyline points="205,134 216,146 228,146" fill="none" stroke="#000" stroke-width="3"/>';
+  }
+
+  return {num, svg};
+}
+
+function precipInches3h(t){
+  const qpf = qpfLayer();
+  if (!qpf) return "";
+
+  const amt = integrateLayer(qpf, t - 3 * 3600000, t);
+  const u = String(qpf.uom || "");
+
+  let inches = amt;
+  if (u.includes(":mm") || /\bmm\b/.test(u)) inches = amt / 25.4;
+  else if (u.includes(":m") || /\bm\b/.test(u)) inches = amt * 39.3701;
+  else if (u.includes("inch")) inches = amt;
+
+  if (!isFinite(inches) || inches <= 0.001) return "0.00";
+  return inches.toFixed(2);
+}
+
 function weatherCode(text){
   text = String(text || "").toUpperCase();
   if (text.includes("THUNDER")) return "TS";
@@ -144,17 +264,21 @@ function weatherCode(text){
   if (text.includes("FOG") || text.includes("MIST")) return "FG";
   return "";
 }
+
 function skyCoverPct(period, t){
-  const v = gridValue(gridLayer("skyCover"), t);
+  const v = gridValue(layer("skyCover"), t);
   if (v != null) return v;
+
   const text = String(period.shortForecast || "").toUpperCase();
-  if (text.includes("OVERCAST") || text.includes("CLOUDY")) return 100;
+  if (text.includes("OVERCAST")) return 100;
   if (text.includes("MOSTLY CLOUDY")) return 75;
   if (text.includes("PARTLY CLOUDY")) return 50;
   if (text.includes("MOSTLY SUNNY")) return 25;
   if (text.includes("SUNNY") || text.includes("CLEAR")) return 0;
+  if (text.includes("CLOUDY")) return 100;
   return 0;
 }
+
 function skySvg(p){
   const open = '<circle cx="160" cy="130" r="18" fill="#fff" stroke="#000" stroke-width="3"/>';
   if (p >= 87) return '<circle cx="160" cy="130" r="18" fill="#000" stroke="#000" stroke-width="3"/>';
@@ -163,13 +287,13 @@ function skySvg(p){
   if (p >= 12) return open + '<path d="M160 130 L160 112 A18 18 0 0 1 178 130 Z" fill="#000"/>';
   return open;
 }
+
 function gridWindKt(t){
-  const layer = gridLayer("windSpeed");
-  const v = gridValue(layer, t);
+  const w = layer("windSpeed");
+  const v = gridValue(w, t);
   if (v == null) return null;
 
-  const u = String(layer?.uom || "");
-
+  const u = String(w?.uom || "");
   if (u.includes("km_h-1")) return Math.round(v * 0.539957);
   if (u.includes("m_s-1"))  return Math.round(v * 1.94384);
   if (u.includes("mi_h-1")) return Math.round(v * 0.868976);
@@ -177,66 +301,81 @@ function gridWindKt(t){
 
   return Math.round(v);
 }
+
 function gridWindDeg(t){
-  const v = gridValue(gridLayer("windDirection"), t);
+  const v = gridValue(layer("windDirection"), t);
   if (v == null || isNaN(v)) return null;
   return ((+v % 360) + 360) % 360;
 }
+
 function degFromCardinal(s){
   return dirMap[String(s || "").toUpperCase()] ?? null;
 }
+
+function parseSpeedKt(s){
+  const nums = String(s || "").match(/\d+(\.\d+)?/g)?.map(Number) || [];
+  if (!nums.length) return 0;
+  return Math.round((nums.reduce((a,b)=>a+b,0) / nums.length) * 0.868976);
+}
+
 function windSvg(dir, kt){
   if (kt == null || kt < 3) return '<circle cx="160" cy="130" r="2" fill="#000"/>';
 
   let rem = Math.round(kt / 5) * 5;
-  let y = 70;
-  let s = `<g transform="rotate(${dir} 160 130)" stroke="#000" stroke-width="3" fill="#000" stroke-linecap="round">
+  let y = 82;
+
+  let s = `<g transform="rotate(${dir} 160 130)" stroke="#000" stroke-width="3" fill="#000" stroke-linecap="round" stroke-linejoin="round">
     <line x1="160" y1="130" x2="160" y2="70"/>`;
 
   while (rem >= 50){
-    s += `<polygon points="160,${y} 182,${y+6} 160,${y+12}"/>`;
-    y += 12;
+    s += `<polygon points="160,${y} 182,${y} 160,${y-12}"/>`;
+    y += 14;
     rem -= 50;
   }
   while (rem >= 10){
-    s += `<line x1="160" y1="${y}" x2="180" y2="${y+8}"/>`;
+    s += `<line x1="160" y1="${y}" x2="180" y2="${y-8}"/>`;
     y += 10;
     rem -= 10;
   }
   if (rem >= 5){
-    s += `<line x1="160" y1="${y}" x2="172" y2="${y+5}"/>`;
+    s += `<line x1="160" y1="${y}" x2="172" y2="${y-5}"/>`;
   }
 
   return s + `</g>`;
 }
-function render(t){
+  function render(t){
   const p = nearestPeriod(t);
 
-  const temp = p.temperature ?? cToF(gridValue(gridLayer("temperature"), t));
-  const rh = p.relativeHumidity?.value ?? gridValue(gridLayer("relativeHumidity"), t);
-  const dpC = p.dewpoint?.value ?? gridValue(gridLayer("dewpoint"), t);
-  const dew = dpC != null ? cToF(dpC) : dewpointFromTRH(temp, rh);
+  const temp = p.temperature ?? cToF(gridValue(layer("temperature"), t));
+  const rh = p.relativeHumidity?.value ?? gridValue(layer("relativeHumidity"), t);
+  const dpC = p.dewpoint?.value ?? gridValue(layer("dewpoint"), t);
+  const dpt = dpC != null ? cToF(dpC) : dewpointFromTRH(temp, rh);
 
   const windKt = gridWindKt(t) ?? parseSpeedKt(p.windSpeed);
   const windDir = gridWindDeg(t) ?? degFromCardinal(p.windDirection) ?? 0;
 
-  const slp = pressureCode(gridValue(gridLayer("seaLevelPressure","barometricPressure","pressure","pressureReducedToMeanSeaLevel"), t));
+  const pl = pressureLayer();
+  const pressure = pressureCode(gridValue(pl, t), pl?.uom);
+  const trend = pressureTrend(t);
+
   const wx = weatherCode(p.shortForecast);
-  const visM = gridValue(gridLayer("visibility"), t);
+  const visM = gridValue(layer("visibility"), t);
   const vis = visM == null ? "" : (visM / 1609.344).toFixed(1).replace(/\.0$/,"");
-  const pop = p.probabilityOfPrecipitation?.value;
+
+  const pcp3 = precipInches3h(t);
   const sky = skyCoverPct(p, t);
 
   selectedLabel.textContent = fmt(Date.parse(p.startTime));
 
   station.innerHTML = `
-    <text x="70"  y="95">${temp ?? ""}</text>
-    <text x="70"  y="215">${dew ?? ""}</text>
-    <text x="45"  y="145">${vis}</text>
-    <text x="210" y="95">${slp}</text>
-    <text x="104" y="145">${wx}</text>
-    <text x="210" y="145">${rh == null ? "" : Math.round(rh)}</text>
-    <text x="220" y="215">${pop == null ? "" : pop}</text>
+    <text x="70" y="95">${temp ?? ""}</text>          <!-- upper left: temp -->
+    <text x="70" y="215">${dpt ?? ""}</text>         <!-- lower left: dew point -->
+    <text x="30" y="145">${vis}</text>               <!-- middle left: visibility -->
+    <text x="104" y="145">${wx}</text>               <!-- middle left: weather -->
+    <text x="210" y="95">${pressure}</text>          <!-- upper right: pressure -->
+    ${trend.svg}                                     <!-- middle right: tendency symbol -->
+    <text x="234" y="145" class="small">${trend.num}</text>
+    <text x="220" y="215" class="small">${pcp3}</text> <!-- lower right: precip, 3h -->
     ${skySvg(sky)}
     ${windSvg(windDir, windKt)}
   `;
@@ -250,7 +389,7 @@ async function load(){
   }).then(r => r.json());
 
   const [h, g] = await Promise.all([
-    fetch(point.properties.forecastHourly, {headers:{Accept:"application/geo+json"}}).then(r => r.json()),
+    fetch(point.properties.forecastHourly,   {headers:{Accept:"application/geo+json"}}).then(r => r.json()),
     fetch(point.properties.forecastGridData, {headers:{Accept:"application/geo+json"}}).then(r => r.json())
   ]);
 
