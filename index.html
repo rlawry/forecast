@@ -140,6 +140,8 @@ let gridForecast = null;
 let pendingLocation = null;
 let searchTimer = null;
 let searchAbort = null;
+let latestObservation = null;
+let observationStationUrl = null;
 
 const STORAGE_KEY = "nwsStationModelLocation";
 
@@ -398,7 +400,10 @@ function render(t){
   const windKt = gridWindKt(t) ?? parseSpeedKt(p.windSpeed);
   const windDir = gridWindDeg(t) ?? degFromCardinal(p.windDirection) ?? 0;
   const pl = pressureLayer();
-  const pressure = pressureCode(gridValue(pl, t), pl?.uom);
+  const pressure =
+    gridValue(pl, t) != null
+      ? pressureCode(gridValue(pl, t), pl?.uom)
+      : observedPressureCode();
   const trend = pressureTrend(t);
   const wx = weatherCode(p.shortForecast);
   const visM = gridValue(layer("visibility"), t);
@@ -494,13 +499,25 @@ async function loadLocation(loc){
       headers:{Accept:"application/geo+json"}
     }).then(r => r.json());
 
-    const [h, g] = await Promise.all([
-      fetch(point.properties.forecastHourly, {headers:{Accept:"application/geo+json"}}).then(r => r.json()),
-      fetch(point.properties.forecastGridData, {headers:{Accept:"application/geo+json"}}).then(r => r.json())
-    ]);
+    observationStationUrl = point.properties.observationStations;
 
+    const stations = await fetch(observationStationUrl, {
+      headers:{Accept:"application/geo+json"}
+    }).then(r => r.json());
+    
+    const firstStationUrl = stations.features?.[0]?.id;
+    
+    const [h, g, obs] = await Promise.all([
+      fetch(point.properties.forecastHourly,   {headers:{Accept:"application/geo+json"}}).then(r => r.json()),
+      fetch(point.properties.forecastGridData, {headers:{Accept:"application/geo+json"}}).then(r => r.json()),
+      firstStationUrl
+        ? fetch(`${firstStationUrl}/observations/latest`, {headers:{Accept:"application/geo+json"}}).then(r => r.json())
+        : Promise.resolve(null)
+    ]);
+    
     hourlyForecast = h;
     gridForecast = g;
+    latestObservation = obs;
 
     const periods = hourlyForecast.properties.periods;
     const first = Date.parse(periods[0].startTime);
@@ -526,6 +543,14 @@ async function loadLocation(loc){
     searchStatus.textContent = "Could not load that location.";
   }
 }
+
+function observedPressureCode(){
+  const p = latestObservation?.properties;
+  const v = p?.seaLevelPressure?.value ?? p?.barometricPressure?.value;
+  const u = p?.seaLevelPressure?.unitCode ?? p?.barometricPressure?.unitCode;
+  return pressureCode(v, u);
+}
+  
 function initSearch(){
   addressInput.addEventListener("input", () => {
     pendingLocation = null;
