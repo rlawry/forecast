@@ -3,7 +3,6 @@
 <head>
 <meta charset="utf-8">
 <title>NWS forecast station model</title>
-<script id="search-js" defer src="https://api.mapbox.com/search-js/v1.5.0/web.js"></script>
 <style>
   body{
     margin:0;
@@ -22,17 +21,50 @@
     grid-template-columns:1fr auto;
     gap:8px;
     margin-bottom:8px;
-    align-items:center;
+    align-items:start;
   }
-  mapbox-search-box{
-    display:block;
+  .searchWrap{
+    position:relative;
+  }
+  #addressInput{
     width:100%;
+    box-sizing:border-box;
     min-height:40px;
+    padding:8px 10px;
+    font:14px Arial,sans-serif;
   }
   .searchRow button{
     padding:8px 12px;
     font:14px Arial,sans-serif;
     cursor:pointer;
+    min-height:40px;
+  }
+  #suggestions{
+    position:absolute;
+    left:0;
+    right:0;
+    top:100%;
+    background:#fff;
+    border:1px solid #bbb;
+    border-top:none;
+    z-index:20;
+    text-align:left;
+    display:none;
+    max-height:220px;
+    overflow-y:auto;
+  }
+  .suggestion{
+    padding:8px 10px;
+    font:14px Arial,sans-serif;
+    cursor:pointer;
+    border-top:1px solid #eee;
+    background:#fff;
+  }
+  .suggestion:first-child{
+    border-top:none;
+  }
+  .suggestion:hover{
+    background:#f2f2f2;
   }
   #searchStatus{
     min-height:18px;
@@ -80,7 +112,10 @@
 
 <div class="wrap">
   <div class="searchRow">
-    <mapbox-search-box id="mbSearch"></mapbox-search-box>
+    <div class="searchWrap">
+      <input id="addressInput" type="text" placeholder="Search address" autocomplete="off">
+      <div id="suggestions"></div>
+    </div>
     <button id="loadBtn" type="button">Load Location</button>
   </div>
 
@@ -103,8 +138,9 @@
 let hourlyForecast = null;
 let gridForecast = null;
 let pendingLocation = null;
+let searchTimer = null;
+let searchAbort = null;
 
-const MAPBOX_TOKEN = "YOUR_MAPBOX_ACCESS_TOKEN";
 const STORAGE_KEY = "nwsStationModelLocation";
 
 const DEFAULT_LOCATION = {
@@ -124,7 +160,8 @@ const loading = $("loading");
 const locationName = $("locationName");
 const searchStatus = $("searchStatus");
 const loadBtn = $("loadBtn");
-const mbSearch = $("mbSearch");
+const addressInput = $("addressInput");
+const suggestions = $("suggestions");
 
 const dirMap = {
   N:0, NNE:22.5, NE:45, ENE:67.5, E:90, ESE:112.5, SE:135, SSE:157.5,
@@ -322,18 +359,15 @@ function windSvg(dir, kt){
   if (kt == null || kt < 3) return '<circle cx="160" cy="130" r="2" fill="#000"/>';
 
   let rem = Math.round(kt / 5) * 5;
-
   const x = 160;
   const yCenter = 130;
   const yTip = 70;
-
   let cursor = yTip;
   let placedAnything = false;
 
   let s = `<g transform="rotate(${dir} 160 130)" stroke="#000" stroke-width="3" fill="#000" stroke-linecap="round" stroke-linejoin="round">
     <line x1="${x}" y1="${yCenter}" x2="${x}" y2="${yTip}"/>`;
 
-  // 50-knot pennants start at the tip
   while (rem >= 50){
     s += `<polygon points="${x},${cursor} ${x+22},${cursor} ${x},${cursor+12}"/>`;
     cursor += 14;
@@ -341,7 +375,6 @@ function windSvg(dir, kt){
     placedAnything = true;
   }
 
-  // 10-knot barbs start at the tip unless a pennant already used it
   while (rem >= 10){
     s += `<line x1="${x}" y1="${cursor}" x2="${x+20}" y2="${cursor-8}"/>`;
     cursor += 10;
@@ -349,8 +382,6 @@ function windSvg(dir, kt){
     placedAnything = true;
   }
 
-  // A lone 5-knot barb should be inset.
-  // Otherwise it follows the last placed symbol.
   if (rem >= 5){
     const y = placedAnything ? cursor : yTip + 10;
     s += `<line x1="${x}" y1="${y}" x2="${x+12}" y2="${y-5}"/>`;
@@ -358,7 +389,6 @@ function windSvg(dir, kt){
 
   return s + `</g>`;
 }
-  
 function render(t){
   const p = nearestPeriod(t);
   const temp = p.temperature ?? cToF(gridValue(layer("temperature"), t));
@@ -404,17 +434,54 @@ function saveLocation(loc){
 function getSavedLocation(){
   try{ return JSON.parse(localStorage.getItem(STORAGE_KEY)); }catch(e){ return null; }
 }
-function featureToLocation(detail){
-  const f = detail?.features?.[0] || detail?.feature || detail;
-  const coords = f?.geometry?.coordinates || f?.center;
-  if (!coords || coords.length < 2) return null;
-  const name =
-    f?.properties?.full_address ||
-    f?.properties?.place_formatted ||
-    f?.place_name ||
-    f?.properties?.name ||
-    "Selected location";
-  return { name, lon:+coords[0], lat:+coords[1] };
+function clearSuggestions(){
+  suggestions.innerHTML = "";
+  suggestions.style.display = "none";
+}
+function showSuggestions(items){
+  suggestions.innerHTML = "";
+  if (!items.length){
+    clearSuggestions();
+    return;
+  }
+  for (const item of items){
+    const div = document.createElement("div");
+    div.className = "suggestion";
+    div.textContent = item.display_name;
+    div.addEventListener("mousedown", () => {
+      pendingLocation = {
+        name: item.display_name,
+        lat: parseFloat(item.lat),
+        lon: parseFloat(item.lon)
+      };
+      addressInput.value = pendingLocation.name;
+      searchStatus.textContent = `Selected: ${pendingLocation.name}`;
+      clearSuggestions();
+    });
+    suggestions.appendChild(div);
+  }
+  suggestions.style.display = "block";
+}
+async function searchAddresses(q){
+  if (searchAbort) searchAbort.abort();
+  searchAbort = new AbortController();
+
+  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=5&countrycodes=us&q=${encodeURIComponent(q)}`;
+
+  try{
+    const data = await fetch(url, {
+      signal: searchAbort.signal,
+      headers: {
+        "Accept": "application/json"
+      }
+    }).then(r => r.json());
+
+    showSuggestions(Array.isArray(data) ? data : []);
+  }catch(e){
+    if (e.name !== "AbortError"){
+      clearSuggestions();
+    }
+  }
 }
 async function loadLocation(loc){
   setLoading("Loading");
@@ -459,37 +526,45 @@ async function loadLocation(loc){
     searchStatus.textContent = "Could not load that location.";
   }
 }
-function initMapbox(){
-  if (!window.customElements.get("mapbox-search-box")) return;
+function initSearch(){
+  addressInput.addEventListener("input", () => {
+    pendingLocation = null;
+    searchStatus.textContent = "";
+    const q = addressInput.value.trim();
 
-  mbSearch.accessToken = MAPBOX_TOKEN;
-  mbSearch.options = {
-    country: "US",
-    language: "en"
-  };
-
-  mbSearch.addEventListener("retrieve", (e) => {
-    const loc = featureToLocation(e.detail);
-    if (!loc){
-      pendingLocation = null;
-      searchStatus.textContent = "Selection did not include coordinates.";
+    if (searchTimer) clearTimeout(searchTimer);
+    if (q.length < 3){
+      clearSuggestions();
       return;
     }
-    pendingLocation = loc;
-    searchStatus.textContent = `Selected: ${loc.name}`;
+
+    searchTimer = setTimeout(() => searchAddresses(q), 300);
+  });
+
+  addressInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter"){
+      e.preventDefault();
+      const first = suggestions.querySelector(".suggestion");
+      if (first) first.dispatchEvent(new MouseEvent("mousedown"));
+    }
+  });
+
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".searchWrap")) clearSuggestions();
   });
 
   loadBtn.addEventListener("click", () => {
     if (!pendingLocation){
-      searchStatus.textContent = "Choose a result from the autocomplete list first.";
+      searchStatus.textContent = "Choose a result from the search list first.";
       return;
     }
     loadLocation(pendingLocation);
   });
 }
 function init(){
-  initMapbox();
+  initSearch();
   const saved = getSavedLocation() || DEFAULT_LOCATION;
+  addressInput.value = saved.name;
   setLocationTitle(saved.name);
   loadLocation(saved);
 }
