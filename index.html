@@ -13,8 +13,43 @@
     font-family:Arial,sans-serif;
   }
   .wrap{
-    width:360px;
+    width:420px;
     text-align:center;
+  }
+  .searchRow{
+    display:flex;
+    gap:6px;
+    margin-bottom:8px;
+  }
+  .searchRow input{
+    flex:1;
+    padding:8px;
+    font:14px Arial,sans-serif;
+  }
+  .searchRow button,
+  .pickerRow button{
+    padding:8px 10px;
+    font:14px Arial,sans-serif;
+    cursor:pointer;
+  }
+  .pickerRow{
+    display:flex;
+    gap:6px;
+    margin-bottom:10px;
+  }
+  .pickerRow select{
+    flex:1;
+    padding:8px;
+    font:14px Arial,sans-serif;
+  }
+  #searchStatus{
+    min-height:18px;
+    font-size:12px;
+    margin-bottom:6px;
+  }
+  #locationName{
+    font:18px Arial,sans-serif;
+    margin-bottom:8px;
   }
   #loading{
     font:16px Arial,sans-serif;
@@ -52,9 +87,24 @@
 <body>
 
 <div class="wrap">
+  <div class="searchRow">
+    <input id="addressInput" type="text" placeholder="Enter address">
+    <button id="searchBtn" type="button">Search</button>
+  </div>
+
+  <div class="pickerRow">
+    <select id="addressResults"></select>
+    <button id="loadBtn" type="button">Load Location</button>
+  </div>
+
+  <div id="searchStatus"></div>
+  <div id="locationName"></div>
   <div id="loading">Loading</div>
+
   <svg id="station" viewBox="0 0 320 260" aria-label="Forecast station model"></svg>
+
   <input id="timeSlider" type="range">
+
   <div class="labels">
     <span id="startLabel"></span>
     <span id="selectedLabel"></span>
@@ -66,16 +116,28 @@
 let hourlyForecast = null;
 let gridForecast = null;
 
-// South Lewis Central School High School, Turin NY
-const lat = 43.6359, lon = -75.3937;
+const DEFAULT_LOCATION = {
+  name: "South Lewis Central School High School, Turin, NY",
+  lat: 43.6359,
+  lon: -75.3937
+};
+
+const STORAGE_KEY = "nwsStationModelLocation";
 
 const $ = id => document.getElementById(id);
+
 const station = $("station");
 const slider = $("timeSlider");
 const startLabel = $("startLabel");
 const selectedLabel = $("selectedLabel");
 const endLabel = $("endLabel");
 const loading = $("loading");
+const addressInput = $("addressInput");
+const addressResults = $("addressResults");
+const searchBtn = $("searchBtn");
+const loadBtn = $("loadBtn");
+const searchStatus = $("searchStatus");
+const locationName = $("locationName");
 
 const dirMap = {
   N:0, NNE:22.5, NE:45, ENE:67.5, E:90, ESE:112.5, SE:135, SSE:157.5,
@@ -207,8 +269,8 @@ function pressureHpa(v, u){
   if (u.includes(":Pa") || /\bPa\b/.test(u)) return v / 100;
   if (u.includes("kPa")) return v * 10;
   if (u.includes("hPa") || u.includes("mb")) return v;
-  if (v > 2000) return v / 100; // likely Pa
-  return v; // likely already hPa
+  if (v > 2000) return v / 100;
+  return v;
 }
 
 function pressureCode(v, u){
@@ -343,7 +405,8 @@ function windSvg(dir, kt){
 
   return s + `</g>`;
 }
-  function render(t){
+
+function render(t){
   const p = nearestPeriod(t);
 
   const temp = p.temperature ?? cToF(gridValue(layer("temperature"), t));
@@ -368,14 +431,14 @@ function windSvg(dir, kt){
   selectedLabel.textContent = fmt(Date.parse(p.startTime));
 
   station.innerHTML = `
-    <text x="70" y="95">${temp ?? ""}</text>          <!-- upper left: temp -->
-    <text x="70" y="215">${dpt ?? ""}</text>         <!-- lower left: dew point -->
-    <text x="30" y="145">${vis}</text>               <!-- middle left: visibility -->
-    <text x="104" y="145">${wx}</text>               <!-- middle left: weather -->
-    <text x="210" y="95">${pressure}</text>          <!-- upper right: pressure -->
-    ${trend.svg}                                     <!-- middle right: tendency symbol -->
+    <text x="70" y="95">${temp ?? ""}</text>
+    <text x="70" y="215">${dpt ?? ""}</text>
+    <text x="30" y="145">${vis}</text>
+    <text x="104" y="145">${wx}</text>
+    <text x="210" y="95">${pressure}</text>
+    ${trend.svg}
     <text x="234" y="145" class="small">${trend.num}</text>
-    <text x="220" y="215" class="small">${pcp3}</text> <!-- lower right: precip, 3h -->
+    <text x="220" y="215" class="small">${pcp3}</text>
     ${skySvg(sky)}
     ${windSvg(windDir, windKt)}
   `;
@@ -383,36 +446,158 @@ function windSvg(dir, kt){
   loading.style.display = "none";
 }
 
-async function load(){
-  const point = await fetch(`https://api.weather.gov/points/${lat},${lon}`, {
-    headers:{Accept:"application/geo+json"}
-  }).then(r => r.json());
-
-  const [h, g] = await Promise.all([
-    fetch(point.properties.forecastHourly,   {headers:{Accept:"application/geo+json"}}).then(r => r.json()),
-    fetch(point.properties.forecastGridData, {headers:{Accept:"application/geo+json"}}).then(r => r.json())
-  ]);
-
-  hourlyForecast = h;
-  gridForecast = g;
-
-  const periods = hourlyForecast.properties.periods;
-  const first = Date.parse(periods[0].startTime);
-  const last  = Date.parse(periods[periods.length - 1].startTime);
-
-  slider.min = first;
-  slider.max = last;
-  slider.step = 3600000;
-  slider.value = first;
-
-  startLabel.textContent = fmt(first);
-  endLabel.textContent = fmt(last);
-
-  render(first);
+function saveLocation(loc){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(loc));
 }
 
-slider.addEventListener("input", e => render(+e.target.value));
-load();
+function getSavedLocation(){
+  try{
+    return JSON.parse(localStorage.getItem(STORAGE_KEY));
+  }catch(e){
+    return null;
+  }
+}
+
+function setLocationTitle(name){
+  locationName.textContent = name || "";
+}
+
+function setLoading(msg){
+  loading.textContent = msg || "Loading";
+  loading.style.display = "block";
+}
+
+function clearAddressResults(){
+  addressResults.innerHTML = "";
+}
+
+function fillAddressResults(matches){
+  clearAddressResults();
+  matches.forEach((m, i) => {
+    const opt = document.createElement("option");
+    opt.value = i;
+    opt.textContent = m.matchedAddress;
+    opt.dataset.name = m.matchedAddress;
+    opt.dataset.lat = m.coordinates.y;
+    opt.dataset.lon = m.coordinates.x;
+    addressResults.appendChild(opt);
+  });
+}
+
+async function searchAddress(){
+  const q = addressInput.value.trim();
+  if (!q){
+    searchStatus.textContent = "Enter an address.";
+    return;
+  }
+
+  searchStatus.textContent = "Searching...";
+  clearAddressResults();
+
+  const url = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?" + new URLSearchParams({
+    address: q,
+    benchmark: "Public_AR_Current",
+    format: "json"
+  });
+
+  try{
+    const data = await fetch(url).then(r => r.json());
+    const matches = data?.result?.addressMatches || [];
+
+    if (!matches.length){
+      searchStatus.textContent = "No matches found.";
+      return;
+    }
+
+    fillAddressResults(matches);
+    searchStatus.textContent = `${matches.length} match${matches.length === 1 ? "" : "es"} found. Select one, then load it.`;
+  }catch(e){
+    searchStatus.textContent = "Address search failed.";
+  }
+}
+
+async function loadLocation(loc){
+  setLoading("Loading");
+  setLocationTitle(loc.name);
+  slider.disabled = true;
+
+  try{
+    const point = await fetch(`https://api.weather.gov/points/${loc.lat},${loc.lon}`, {
+      headers:{Accept:"application/geo+json"}
+    }).then(r => r.json());
+
+    const [h, g] = await Promise.all([
+      fetch(point.properties.forecastHourly, {headers:{Accept:"application/geo+json"}}).then(r => r.json()),
+      fetch(point.properties.forecastGridData, {headers:{Accept:"application/geo+json"}}).then(r => r.json())
+    ]);
+
+    hourlyForecast = h;
+    gridForecast = g;
+
+    const periods = hourlyForecast.properties.periods;
+    const first = Date.parse(periods[0].startTime);
+    const last  = Date.parse(periods[periods.length - 1].startTime);
+
+    slider.min = first;
+    slider.max = last;
+    slider.step = 3600000;
+    slider.value = first;
+    slider.disabled = false;
+
+    startLabel.textContent = fmt(first);
+    endLabel.textContent = fmt(last);
+
+    render(first);
+    saveLocation(loc);
+  }catch(e){
+    station.innerHTML = "";
+    startLabel.textContent = "";
+    selectedLabel.textContent = "";
+    endLabel.textContent = "";
+    setLoading("Load failed");
+  }
+}
+
+searchBtn.addEventListener("click", searchAddress);
+
+addressInput.addEventListener("keydown", e => {
+  if (e.key === "Enter") searchAddress();
+});
+
+loadBtn.addEventListener("click", () => {
+  const opt = addressResults.selectedOptions[0];
+  if (!opt){
+    searchStatus.textContent = "Select an address first.";
+    return;
+  }
+
+  const loc = {
+    name: opt.dataset.name,
+    lat: parseFloat(opt.dataset.lat),
+    lon: parseFloat(opt.dataset.lon)
+  };
+
+  loadLocation(loc);
+});
+
+slider.addEventListener("input", e => {
+  if (hourlyForecast) render(+e.target.value);
+});
+
+(function init(){
+  const saved = getSavedLocation() || DEFAULT_LOCATION;
+  addressInput.value = saved.name || "";
+  clearAddressResults();
+
+  const opt = document.createElement("option");
+  opt.textContent = saved.name;
+  opt.dataset.name = saved.name;
+  opt.dataset.lat = saved.lat;
+  opt.dataset.lon = saved.lon;
+  addressResults.appendChild(opt);
+
+  loadLocation(saved);
+})();
 </script>
 
 </body>
