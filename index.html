@@ -47,17 +47,17 @@
     font:16px Arial,sans-serif;
     margin-bottom:8px;
   }
-  svg{
+  #station{
     width:320px;
     height:260px;
     display:block;
     margin:0 auto;
   }
-  text{
+  #station text{
     font:24px Arial,sans-serif;
     fill:#000;
   }
-  .small{
+  #station .small{
     font-size:18px;
   }
   input[type="range"]{
@@ -320,23 +320,45 @@ function parseSpeedKt(s){
 }
 function windSvg(dir, kt){
   if (kt == null || kt < 3) return '<circle cx="160" cy="130" r="2" fill="#000"/>';
+
   let rem = Math.round(kt / 5) * 5;
-  let y = 82;
+
+  const x = 160;
+  const yCenter = 130;
+  const yTip = 70;
+
+  let cursor = yTip;
+  let placedAnything = false;
+
   let s = `<g transform="rotate(${dir} 160 130)" stroke="#000" stroke-width="3" fill="#000" stroke-linecap="round" stroke-linejoin="round">
-    <line x1="160" y1="130" x2="160" y2="70"/>`;
+    <line x1="${x}" y1="${yCenter}" x2="${x}" y2="${yTip}"/>`;
+
+  // 50-knot pennants start at the tip
   while (rem >= 50){
-    s += `<polygon points="160,${y} 182,${y} 160,${y-12}"/>`;
-    y += 14;
+    s += `<polygon points="${x},${cursor} ${x+22},${cursor} ${x},${cursor+12}"/>`;
+    cursor += 14;
     rem -= 50;
+    placedAnything = true;
   }
+
+  // 10-knot barbs start at the tip unless a pennant already used it
   while (rem >= 10){
-    s += `<line x1="160" y1="${y}" x2="180" y2="${y-8}"/>`;
-    y += 10;
+    s += `<line x1="${x}" y1="${cursor}" x2="${x+20}" y2="${cursor-8}"/>`;
+    cursor += 10;
     rem -= 10;
+    placedAnything = true;
   }
-  if (rem >= 5) s += `<line x1="160" y1="${y}" x2="172" y2="${y-5}"/>`;
+
+  // A lone 5-knot barb should be inset.
+  // Otherwise it follows the last placed symbol.
+  if (rem >= 5){
+    const y = placedAnything ? cursor : yTip + 10;
+    s += `<line x1="${x}" y1="${y}" x2="${x+12}" y2="${y-5}"/>`;
+  }
+
   return s + `</g>`;
 }
+  
 function render(t){
   const p = nearestPeriod(t);
   const temp = p.temperature ?? cToF(gridValue(layer("temperature"), t));
