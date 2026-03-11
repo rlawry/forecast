@@ -16,9 +16,15 @@
     width:360px;
     text-align:center;
   }
+  #loading{
+    font:16px Arial,sans-serif;
+    margin-bottom:8px;
+  }
   svg{
     width:320px;
     height:260px;
+    display:block;
+    margin:0 auto;
   }
   text{
     font:24px Arial,sans-serif;
@@ -43,6 +49,7 @@
 <body>
 
 <div class="wrap">
+  <div id="loading">Loading</div>
   <svg id="station" viewBox="0 0 320 260" aria-label="Forecast station model"></svg>
   <input id="timeSlider" type="range">
   <div class="labels">
@@ -56,13 +63,16 @@
 let hourlyForecast = null;
 let gridForecast = null;
 
-const lat = 43.0481, lon = -76.1474; // change these
+// South Lewis Central School High School, Turin NY
+const lat = 43.6359, lon = -75.3937;
+
 const $ = id => document.getElementById(id);
 const station = $("station");
 const slider = $("timeSlider");
 const startLabel = $("startLabel");
 const selectedLabel = $("selectedLabel");
 const endLabel = $("endLabel");
+const loading = $("loading");
 
 const dirMap = {
   N:0, NNE:22.5, NE:45, ENE:67.5, E:90, ESE:112.5, SE:135, SSE:157.5,
@@ -197,7 +207,10 @@ function render(t){
     ${skySvg(sky)}
     ${windSvg(windDir, windKt)}
   `;
+
+  loading.style.display = "none";
 }
+
 async function load(){
   const point = await fetch(`https://api.weather.gov/points/${lat},${lon}`, {
     headers:{Accept:"application/geo+json"}
