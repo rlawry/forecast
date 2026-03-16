@@ -205,12 +205,14 @@
     #pressureWrap h3 {
       font-size: 14px;
       margin: 0 0 6px;
+      visibility: hidden;
     }
 
     #pressureTable {
       width: 100%;
       border-collapse: collapse;
       font-size: 12px;
+      visibility: hidden;
     }
 
     #pressureTable th,
@@ -226,6 +228,51 @@
 
     #pressureTable td:nth-child(1) {
       white-space: nowrap;
+    }
+
+
+    .sliderRow {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+      margin-top: 10px;
+    }
+
+    .sliderRow input[type="range"] {
+      margin-top: 0;
+    }
+
+    #chartWrap {
+      position: relative;
+      margin-top: 12px;
+      margin-bottom: 14px;
+      min-height: 230px;
+      border: 1px solid #cfcfcf;
+      background: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #chartCanvas {
+      width: 100%;
+      height: 230px;
+      display: none;
+    }
+
+    #chartOverlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      text-align: center;
+      font: 16px Arial, sans-serif;
+      color: #555;
+      pointer-events: none;
+      background: rgba(255,255,255,0.9);
     }
   </style>
 </head>
@@ -257,12 +304,20 @@
       <button id="forwardFastBtn" type="button">&gt;&gt;</button>
     </div>
 
-    <input id="timeSlider" type="range">
+    <div class="sliderRow">
+      <input id="timeSlider" type="range">
+      <button id="nowBtn" type="button">Now</button>
+    </div>
 
     <div class="labels">
       <span id="startLabel"></span>
       <span id="selectedLabel"></span>
       <span id="endLabel"></span>
+    </div>
+
+    <div id="chartWrap">
+      <canvas id="chartCanvas" aria-label="Weather variable chart"></canvas>
+      <div id="chartOverlay">Select Weather Variables to See Plot</div>
     </div>
 
     <div id="sourceRow">Source: <a id="sourceLink" href="#" target="_blank" rel="noopener noreferrer">NOAA/NWS</a></div>
@@ -282,6 +337,7 @@
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script>
     const STORAGE_KEY = "nwsStationModelLocation";
     const APP_HEADERS = { Accept: "application/geo+json" };
@@ -437,6 +493,11 @@
     let lastPlaybackMode = { dir: 1, intervalMs: 1000 };
     let currentLoadToken = 0;
     let currentLocation = null;
+    let openMeteoHourMap = new Map();
+    let selectedPlotVars = [];
+    let weatherChart = null;
+    let plotVisitedByVar = {};
+    let lastChartSliderIndex = null;
 
     const $ = id => document.getElementById(id);
     const stationCanvas = $("station");
@@ -460,6 +521,31 @@
     const sourceLink = $("sourceLink");
     const stationMeta = $("stationMeta");
     const pressureTableBody = $("pressureTableBody");
+    const chartCanvas = $("chartCanvas");
+    const chartOverlay = $("chartOverlay");
+    const nowBtn = $("nowBtn");
+
+    const PLOT_COLORS = ["#c62828", "#1565c0", "#2e7d32", "#6a1b9a", "#ef6c00", "#00838f", "#5d4037", "#283593"];
+    const PLOT_VARIABLES = {
+      temperature: { label: "Temperature", axis: "temp", color: PLOT_COLORS[0], unit: "°F" },
+      dewpoint: { label: "Dewpoint", axis: "temp", color: PLOT_COLORS[1], unit: "°F" },
+      pressure: { label: "Pressure", axis: "pressure", color: PLOT_COLORS[2], unit: "hPa" },
+      windSpeed: { label: "Wind Speed", axis: "wind", color: PLOT_COLORS[3], unit: "kt" },
+      windDirection: { label: "Wind Direction", axis: "windDir", color: PLOT_COLORS[4], unit: "°" },
+      visibility: { label: "Visibility", axis: "visibility", color: PLOT_COLORS[5], unit: "mi" },
+      precip: { label: "3 hr Precip", axis: "precip", color: PLOT_COLORS[6], unit: "in" },
+      skyCover: { label: "Sky Cover", axis: "sky", color: PLOT_COLORS[7], unit: "%" }
+    };
+    const CLICK_REGIONS = {
+      temperature: { x: 30, y: 52, w: 62, h: 40 },
+      dewpoint: { x: 30, y: 176, w: 62, h: 40 },
+      visibility: { x: 0, y: 118, w: 38, h: 34 },
+      pressure: { x: 228, y: 52, w: 62, h: 40 },
+      windSpeed: { x: 124, y: 90, w: 72, h: 78 },
+      windDirection: { x: 196, y: 90, w: 30, h: 78 },
+      skyCover: { x: 138, y: 108, w: 44, h: 44 },
+      precip: { x: 214, y: 184, w: 48, h: 32 }
+    };
 
     const spriteAtlas = new Image();
     let spriteAtlasReady = false;
@@ -585,6 +671,41 @@
       const r = await fetch(url, { headers: APP_HEADERS });
       if (!r.ok) throw new Error(`${r.status} ${url}`);
       return r.json();
+    }
+    async function fetchOpenMeteoHourly(loc, pastHours, forecastHours) {
+      const params = new URLSearchParams({
+        latitude: String(loc.lat),
+        longitude: String(loc.lon),
+        hourly: 'pressure_msl,wind_speed_10m,wind_direction_10m',
+        timezone: 'America/New_York',
+        timeformat: 'unixtime',
+        past_hours: String(Math.max(0, Math.round(pastHours))),
+        forecast_hours: String(Math.max(1, Math.round(forecastHours)))
+      });
+      const url = `https://api.open-meteo.com/v1/forecast?${params.toString()}`;
+      const data = await fetch(url).then(async r => {
+        if (!r.ok) throw new Error(`${r.status} ${url}`);
+        return r.json();
+      });
+      const h = data?.hourly;
+      const times = Array.isArray(h?.time) ? h.time : [];
+      const pressures = Array.isArray(h?.pressure_msl) ? h.pressure_msl : [];
+      const windSpeeds = Array.isArray(h?.wind_speed_10m) ? h.wind_speed_10m : [];
+      const windDirs = Array.isArray(h?.wind_direction_10m) ? h.wind_direction_10m : [];
+      const map = new Map();
+      for (let i = 0; i < times.length; i++) {
+        const hour = Number(times[i]) * 1000;
+        if (!Number.isFinite(hour)) continue;
+        const pressure = Number(pressures[i]);
+        const speedKmh = Number(windSpeeds[i]);
+        const direction = Number(windDirs[i]);
+        map.set(floorHour(hour), {
+          pressureHpa: Number.isFinite(pressure) ? pressure : null,
+          windKt: Number.isFinite(speedKmh) ? Math.round(speedKmh * 0.539957) : null,
+          windDirection: Number.isFinite(direction) ? ((direction % 360) + 360) % 360 : null
+        });
+      }
+      return map;
     }
     function chooseNearestStation(stationsFc, loc) {
       const feats = Array.isArray(stationsFc?.features) ? stationsFc.features : [];
@@ -797,9 +918,11 @@
       };
       return dirMap[String(s || "").toUpperCase()] ?? null;
     }
+    function openMeteoAt(t) {
+      return openMeteoHourMap.get(floorHour(t)) || null;
+    }
     function pressureHpaAt(t) {
-      const obs = observationAt(t);
-      return obs?.pressureHpa ?? null;
+      return openMeteoAt(t)?.pressureHpa ?? observationAt(t)?.pressureHpa ?? null;
     }
     function pressureTrendAt(t) {
       const now = pressureHpaAt(t);
@@ -811,6 +934,13 @@
         trend: delta > 0.05 ? "up" : delta < -0.05 ? "down" : "steady"
       };
     }
+    function windSpeedKtAt(t) {
+      return openMeteoAt(t)?.windKt ?? observationAt(t)?.windKt ?? gridWindKt(t) ?? parseSpeedKt(forecastPeriodAt(t)?.windSpeed);
+    }
+    function windDirectionDegAt(t) {
+      const wd = openMeteoAt(t)?.windDirection ?? observationAt(t)?.windDirection ?? gridWindDeg(t) ?? degFromCardinal(forecastPeriodAt(t)?.windDirection);
+      return wd == null ? null : ((wd % 360) + 360) % 360;
+    }
     function dewpointFromTRH(tempF, rh) {
       if (tempF == null || rh == null) return null;
       const t = (tempF - 32) * 5 / 9;
@@ -818,32 +948,24 @@
       const g = Math.log(rh / 100) + (a * t) / (b + t);
       return Math.round((((b * g) / (a - g)) * 9 / 5) + 32);
     }
-    function precipitationIntensity(text) {
-      const t = normalizeText(text);
-      if (!t) return "moderate";
-
-      let score = 0;
-
-      if (/heavy|brief heavy|downpour|intense|torrential/.test(t)) score += 3;
-      if (/moderate|periods of|definite|steady/.test(t)) score += 1;
-      if (/light|very light|flurr(?:y|ies)?/.test(t)) score -= 2;
-
-      if (/slight chance|slight chance of|isolated|patchy|areas of/.test(t)) score -= 2;
-      if (/chance|scattered/.test(t)) score -= 1;
-      if (/likely|numerous|occasional/.test(t)) score += 1;
-      if (/showers likely|snow likely|rain likely/.test(t)) score += 1;
-
-      if (score <= -2) return "light";
-      if (score >= 3) return "heavy";
-      return "moderate";
-    }
-
     function chooseWeatherSpriteFromText(text) {
       const t = normalizeText(text);
       if (!t) return null;
       const tokens = t.split(" ");
-      const intensity = precipitationIntensity(t);
 
+      // 1. Check against the labels correctly defined in SYMBOL_SPRITES
+      for (const [key, spec] of Object.entries(SYMBOL_SPRITES.presentWeather)) {
+        for (const label of spec.labels) {
+          if (label.includes(" ")) {
+            if (t.includes(label)) return key;
+          } else {
+            // Use exact token matching for abbreviations so "ra" doesn't match "random"
+            if (tokens.includes(label)) return key;
+          }
+        }
+      }
+
+      // 2. Fallback to broad substring matching just in case
       if (t.includes("thunder")) {
         if (t.includes("snow")) return "thunder_snow";
         if (t.includes("rain") || t.includes("shower") || t.includes("drizzle")) return "thunder_rain";
@@ -854,36 +976,20 @@
       if (t.includes("dense fog")) return "fog_deep";
       if (t.includes("fog") || t.includes("mist")) return "fog_shallow";
       if (t.includes("haze")) return "haze";
-
-      if (t.includes("drizzle")) {
-        if (t.includes("freezing")) return "freezing";
-        return "drizzle";
-      }
+      if (t.includes("drizzle")) return "drizzle";
       if (t.includes("shower")) {
         if (t.includes("snow")) return "shower_snow";
         return "shower_rain";
       }
       if (t.includes("snow") || t.includes("flurr")) {
-        if (intensity === "heavy") return "snow_heavy";
-        if (intensity === "light") return "snow_light";
+        if (t.includes("heavy")) return "snow_heavy";
+        if (t.includes("light")) return "snow_light";
         return "snow_moderate";
       }
       if (t.includes("rain")) {
-        if (intensity === "heavy") return "rain_heavy";
-        if (intensity === "light") return "rain_light";
+        if (t.includes("heavy")) return "rain_heavy";
+        if (t.includes("light")) return "rain_light";
         return "rain_moderate";
-      }
-
-      // Exact label matching after broader precipitation logic so generic labels like
-      // "rain" do not flatten all forecast wording to the same icon.
-      for (const [key, spec] of Object.entries(SYMBOL_SPRITES.presentWeather)) {
-        for (const label of spec.labels) {
-          if (label.includes(" ")) {
-            if (t.includes(label)) return key;
-          } else {
-            if (tokens.includes(label)) return key;
-          }
-        }
       }
       return null;
     }
@@ -1140,6 +1246,7 @@
       pressureTableBody.innerHTML = "";
       observations = [];
       observationHourMap = new Map();
+      openMeteoHourMap = new Map();
       timeline = [];
       hourlyForecast = null;
       gridForecast = null;
@@ -1179,12 +1286,19 @@
         };
         stationMeta.textContent = stationInfo.stationIdentifier ? `Nearest Station: ${stationInfo.stationIdentifier}` : "";
 
-        setLoading("Loading station observations");
-        observations = await loadObservationHistory(stationInfo.id, startPast, nowHour, token);
+        setLoading("Loading station observations and Open-Meteo pressure/wind");
+        const [loadedObservations, loadedOpenMeteo] = await Promise.all([
+          loadObservationHistory(stationInfo.id, startPast, nowHour, token),
+          fetchOpenMeteoHourly(loc, Math.round((nowHour - startPast) / HOUR_MS), Math.round((forecastEnd - nowHour) / HOUR_MS) + 1)
+        ]);
         if (token !== currentLoadToken) return;
 
+        observations = loadedObservations;
+        openMeteoHourMap = loadedOpenMeteo;
         observationHourMap = buildObservationHourMap(observations, startPast, nowHour);
         buildTimeline(startPast, forecastEnd, nowHour);
+        plotVisitedByVar = {};
+        lastChartSliderIndex = null;
         buildPressureTable();
 
         slider.min = 0;
@@ -1193,6 +1307,7 @@
         const nowIndex = timeline.findIndex(entry => entry.time === nowHour);
         slider.value = nowIndex >= 0 ? nowIndex : Math.floor(timeline.length / 2);
         slider.disabled = false;
+        nowBtn.disabled = false;
 
         startLabel.textContent = timeline.length ? fmt(timeline[0].time) : "";
         endLabel.textContent = timeline.length ? fmt(timeline[timeline.length - 1].time) : "";
@@ -1211,11 +1326,198 @@
         searchStatus.textContent = "Could not load that location.";
       }
     }
+    function valueAtHour(hour, variableKey) {
+      const obsRec = observationAt(hour);
+      const period = forecastPeriodAt(hour);
+      const useObs = !!obsRec && hour <= floorHour(Date.now());
+      const temp = useObs ? obsRec.temperatureF : (period?.temperature ?? cToF(gridValue(layer("temperature"), hour)));
+      if (variableKey === "temperature") return temp;
+      const rh = useObs ? obsRec.relativeHumidity : (period?.relativeHumidity?.value ?? gridValue(layer("relativeHumidity"), hour));
+      const dpC = useObs ? null : (period?.dewpoint?.value ?? gridValue(layer("dewpoint"), hour));
+      const dewpoint = useObs ? obsRec.dewpointF : (dpC != null ? cToF(dpC) : dewpointFromTRH(temp, rh));
+      if (variableKey === "dewpoint") return dewpoint;
+      if (variableKey === "pressure") return pressureHpaAt(hour);
+      if (variableKey === "windSpeed") return windSpeedKtAt(hour);
+      if (variableKey === "windDirection") return windDirectionDegAt(hour);
+      if (variableKey === "visibility") {
+        if (useObs) return obsRec.visibilityMi;
+        const visM = gridValue(layer("visibility"), hour);
+        return visM == null ? null : visM / 1609.344;
+      }
+      if (variableKey === "precip") {
+        const p = precipInches3h(hour);
+        return p === "" ? null : Number(p);
+      }
+      if (variableKey === "skyCover") return skyCoverPct(period, hour, obsRec);
+      return null;
+    }
+    function axisOptionsForSelection() {
+      const selectedAxes = new Set(selectedPlotVars.map(k => PLOT_VARIABLES[k]?.axis).filter(Boolean));
+      return {
+        temp: { type: "linear", position: "left", display: selectedAxes.has("temp"), title: { display: true, text: "Temperature (°F)" } },
+        pressure: { type: "linear", position: "right", display: selectedAxes.has("pressure"), title: { display: true, text: "Pressure (hPa)" }, grid: { drawOnChartArea: false } },
+        wind: { type: "linear", position: "right", offset: true, display: selectedAxes.has("wind"), title: { display: true, text: "Wind (kt)" }, grid: { drawOnChartArea: false } },
+        windDir: { type: "linear", position: "right", offset: true, min: 0, max: 360, display: selectedAxes.has("windDir"), title: { display: true, text: "Wind Direction (°)" }, grid: { drawOnChartArea: false } },
+        visibility: { type: "linear", position: "right", offset: true, beginAtZero: true, display: selectedAxes.has("visibility"), title: { display: true, text: "Visibility (mi)" }, grid: { drawOnChartArea: false } },
+        precip: { type: "linear", position: "right", offset: true, beginAtZero: true, display: selectedAxes.has("precip"), title: { display: true, text: "3 hr Precip (in)" }, grid: { drawOnChartArea: false } },
+        sky: { type: "linear", position: "right", offset: true, min: 0, max: 100, display: selectedAxes.has("sky"), title: { display: true, text: "Sky Cover (%)" }, grid: { drawOnChartArea: false } }
+      };
+    }
+    function seedSelectedVariableAtIndex(key, index) {
+      if (!timeline.length) return;
+      const safeIndex = Math.max(0, Math.min(timeline.length - 1, Number(index) || 0));
+      const visited = new Array(timeline.length).fill(false);
+      visited[safeIndex] = true;
+      plotVisitedByVar[key] = visited;
+    }
+    function markVisitedRange(startIndex, endIndex) {
+      if (!timeline.length || !selectedPlotVars.length) return;
+      const start = Math.max(0, Math.min(timeline.length - 1, Number(startIndex) || 0));
+      const end = Math.max(0, Math.min(timeline.length - 1, Number(endIndex) || 0));
+      const lo = Math.min(start, end);
+      const hi = Math.max(start, end);
+      for (const key of selectedPlotVars) {
+        if (!plotVisitedByVar[key] || plotVisitedByVar[key].length !== timeline.length) {
+          plotVisitedByVar[key] = new Array(timeline.length).fill(false);
+        }
+        for (let i = lo; i <= hi; i++) plotVisitedByVar[key][i] = true;
+      }
+    }
+    function buildTraceDataset(key) {
+      const meta = PLOT_VARIABLES[key];
+      const visited = plotVisitedByVar[key] || [];
+      return {
+        label: meta.label,
+        data: timeline.map((entry, i) => visited[i] ? valueAtHour(entry.time, key) : null),
+        borderColor: meta.color,
+        backgroundColor: meta.color,
+        yAxisID: meta.axis,
+        borderWidth: 2,
+        pointRadius: 0,
+        pointHoverRadius: 0,
+        tension: 0.2,
+        spanGaps: false
+      };
+    }
+    function buildMarkerDataset(key, currentIndex) {
+      const meta = PLOT_VARIABLES[key];
+      const safeIndex = Math.max(0, Math.min(timeline.length - 1, Number(currentIndex) || 0));
+      const markerData = new Array(timeline.length).fill(null);
+      markerData[safeIndex] = valueAtHour(timeline[safeIndex].time, key);
+      return {
+        label: `${meta.label} Current`,
+        data: markerData,
+        borderColor: meta.color,
+        backgroundColor: meta.color,
+        yAxisID: meta.axis,
+        showLine: false,
+        pointRadius: 5,
+        pointHoverRadius: 6,
+        pointBorderWidth: 1
+      };
+    }
+    function rebuildChart() {
+      if (weatherChart) {
+        weatherChart.destroy();
+        weatherChart = null;
+      }
+      if (!selectedPlotVars.length) {
+        chartCanvas.style.display = "none";
+        chartOverlay.style.display = "flex";
+        return;
+      }
+      chartCanvas.style.display = "block";
+      chartOverlay.style.display = "none";
+      weatherChart = new Chart(chartCanvas.getContext("2d"), {
+        type: "line",
+        data: { labels: [], datasets: [] },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          interaction: { mode: "index", intersect: false },
+          plugins: {
+            legend: {
+              display: true,
+              labels: {
+                filter: function(item) {
+                  return !String(item.text || "").endsWith(" Current");
+                }
+              }
+            },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  const baseLabel = String(context.dataset.label || "").replace(/ Current$/, "");
+                  const unit = Object.values(PLOT_VARIABLES).find(v => v.label === baseLabel)?.unit || "";
+                  const val = context.parsed.y;
+                  const digits = unit === "hPa" ? 1 : unit === "in" ? 2 : 0;
+                  return `${baseLabel}: ${val == null ? "--" : Number(val).toFixed(digits)} ${unit}`.trim();
+                }
+              }
+            }
+          },
+          scales: Object.assign({
+            x: { ticks: { maxTicksLimit: 8, maxRotation: 0 }, title: { display: true, text: "Time" } }
+          }, axisOptionsForSelection())
+        }
+      });
+      updateChart(Number(slider.value || 0));
+    }
+    function updateChart(currentIndex) {
+      if (!weatherChart || !selectedPlotVars.length || !timeline.length) return;
+      const safeIndex = Math.max(0, Math.min(timeline.length - 1, Number(currentIndex) || 0));
+      weatherChart.data.labels = timeline.map(entry => new Date(entry.time).toLocaleString([], { month: "short", day: "numeric", hour: "numeric" }));
+      const datasets = [];
+      for (const key of selectedPlotVars) {
+        datasets.push(buildTraceDataset(key));
+        datasets.push(buildMarkerDataset(key, safeIndex));
+      }
+      weatherChart.data.datasets = datasets;
+      weatherChart.options.scales = Object.assign({
+        x: { ticks: { maxTicksLimit: 8, maxRotation: 0 }, title: { display: true, text: "Time" } }
+      }, axisOptionsForSelection());
+      weatherChart.update();
+    }
+    function togglePlotVariable(key) {
+      const idx = selectedPlotVars.indexOf(key);
+      const currentIndex = Math.max(0, Math.min(timeline.length - 1, Number(slider.value || 0)));
+      if (idx >= 0) {
+        selectedPlotVars.splice(idx, 1);
+        delete plotVisitedByVar[key];
+      } else {
+        selectedPlotVars.push(key);
+        seedSelectedVariableAtIndex(key, currentIndex);
+      }
+      rebuildChart();
+      renderByIndex(currentIndex);
+    }
+    function regionHit(x, y) {
+      for (const [key, r] of Object.entries(CLICK_REGIONS)) {
+        if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return key;
+      }
+      return null;
+    }
+    function drawSelectionRect(key) {
+      const r = CLICK_REGIONS[key];
+      const color = PLOT_VARIABLES[key]?.color;
+      if (!r || !color) return;
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(r.x, r.y, r.w, r.h);
+      ctx.restore();
+    }
+
     function renderByIndex(index) {
       if (!timeline.length) return;
       const i = Math.max(0, Math.min(timeline.length - 1, Number(index) || 0));
       slider.value = i;
       renderHour(timeline[i].time);
+      if (lastChartSliderIndex == null) lastChartSliderIndex = i;
+      markVisitedRange(lastChartSliderIndex, i);
+      updateChart(i);
+      lastChartSliderIndex = i;
     }
     function renderHour(hour) {
       const obsRec = observationAt(hour);
@@ -1226,8 +1528,8 @@
       const rh = useObs ? obsRec.relativeHumidity : (period?.relativeHumidity?.value ?? gridValue(layer("relativeHumidity"), hour));
       const dpC = useObs ? null : (period?.dewpoint?.value ?? gridValue(layer("dewpoint"), hour));
       const dewpoint = useObs ? obsRec.dewpointF : (dpC != null ? cToF(dpC) : dewpointFromTRH(temp, rh));
-      const windKt = useObs ? obsRec.windKt : (gridWindKt(hour) ?? parseSpeedKt(period?.windSpeed));
-      const windDir = useObs ? (obsRec.windDirection ?? 0) : (gridWindDeg(hour) ?? degFromCardinal(period?.windDirection) ?? 0);
+      const windKt = windSpeedKtAt(hour);
+      const windDir = windDirectionDegAt(hour) ?? 0;
       const visibility = useObs
         ? (obsRec.visibilityMi == null ? "" : obsRec.visibilityMi.toFixed(1).replace(/\.0$/, ""))
         : (() => {
@@ -1262,8 +1564,8 @@
       if (windKt == null || windKt < 3) drawCalmRing(160, 130, 18);
 
       drawSprite(ctx, "presentWeather", weatherSprite, 108, 128, 1.1);
-
       drawSprite(ctx, "cloudType", cloudSprite, 160, 178, 1.0);
+      selectedPlotVars.forEach(drawSelectionRect);
 
       stationMeta.textContent = stationInfo?.stationIdentifier
         ? `Nearest Station: ${stationInfo.stationIdentifier}`
@@ -1342,11 +1644,34 @@
         stopPlayback();
         renderByIndex(Number(e.target.value));
       });
+      nowBtn.addEventListener("click", () => {
+        stopPlayback();
+        if (!timeline.length) return;
+        const nowHour = floorHour(Date.now());
+        let bestIndex = 0;
+        let bestDelta = Infinity;
+        for (let i = 0; i < timeline.length; i++) {
+          const delta = Math.abs(timeline[i].time - nowHour);
+          if (delta < bestDelta) {
+            bestDelta = delta;
+            bestIndex = i;
+          }
+        }
+        renderByIndex(bestIndex);
+      });
+      stationCanvas.addEventListener("click", e => {
+        const rect = stationCanvas.getBoundingClientRect();
+        const x = (e.clientX - rect.left) * (stationCanvas.width / rect.width);
+        const y = (e.clientY - rect.top) * (stationCanvas.height / rect.height);
+        const hit = regionHit(x, y);
+        if (hit) togglePlotVariable(hit);
+      });
       const saved = getSavedLocation() || DEFAULT_LOCATION;
       addressInput.value = saved.name;
       pendingLocation = saved;
       setLocationTitle(saved.name);
       setForecastSource(saved);
+      rebuildChart();
       loadLocation(saved);
     }
     window.addEventListener("load", init);
