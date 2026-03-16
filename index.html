@@ -1,635 +1,1356 @@
 <!doctype html>
 <html>
+
 <head>
-<meta charset="utf-8">
-<title>NWS forecast station model</title>
-<style>
-  body{
-    margin:0;
-    min-height:100vh;
-    display:grid;
-    place-items:center;
-    background:#fff;
-    font-family:Arial,sans-serif;
-  }
-  .wrap{
-    width:420px;
-    text-align:center;
-  }
-  .searchRow{
-    display:grid;
-    grid-template-columns:1fr auto;
-    gap:8px;
-    margin-bottom:8px;
-    align-items:start;
-  }
-  .searchWrap{
-    position:relative;
-  }
-  #addressInput{
-    width:100%;
-    box-sizing:border-box;
-    min-height:40px;
-    padding:8px 10px;
-    font:14px Arial,sans-serif;
-  }
-  .searchRow button{
-    padding:8px 12px;
-    font:14px Arial,sans-serif;
-    cursor:pointer;
-    min-height:40px;
-  }
-  #suggestions{
-    position:absolute;
-    left:0;
-    right:0;
-    top:100%;
-    background:#fff;
-    border:1px solid #bbb;
-    border-top:none;
-    z-index:20;
-    text-align:left;
-    display:none;
-    max-height:220px;
-    overflow-y:auto;
-  }
-  .suggestion{
-    padding:8px 10px;
-    font:14px Arial,sans-serif;
-    cursor:pointer;
-    border-top:1px solid #eee;
-    background:#fff;
-  }
-  .suggestion:first-child{
-    border-top:none;
-  }
-  .suggestion:hover{
-    background:#f2f2f2;
-  }
-  #searchStatus{
-    min-height:18px;
-    font-size:12px;
-    margin-bottom:6px;
-  }
-  #locationName{
-    font:18px Arial,sans-serif;
-    margin-bottom:8px;
-  }
-  #loading{
-    font:16px Arial,sans-serif;
-    margin-bottom:8px;
-  }
-  #station{
-    width:320px;
-    height:260px;
-    display:block;
-    margin:0 auto;
-  }
-  #station text{
-    font:24px Arial,sans-serif;
-    fill:#000;
-  }
-  #station .small{
-    font-size:18px;
-  }
-  input[type="range"]{
-    width:100%;
-    margin-top:8px;
-  }
-  .labels{
-    display:grid;
-    grid-template-columns:1fr 1fr 1fr;
-    gap:8px;
-    margin-top:6px;
-    font-size:12px;
-  }
-  .labels span:nth-child(1){text-align:left}
-  .labels span:nth-child(2){text-align:center}
-  .labels span:nth-child(3){text-align:right}
-</style>
+  <meta charset="utf-8">
+  <title>NWS forecast station model</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: #fff;
+      font-family: Arial, sans-serif;
+    }
+
+    .wrap {
+      width: 460px;
+      text-align: center;
+      padding: 16px 16px 24px;
+      box-sizing: border-box;
+    }
+
+    .searchRow {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      margin-bottom: 8px;
+      align-items: start;
+    }
+
+    .searchWrap {
+      position: relative;
+    }
+
+    #addressInput {
+      width: 100%;
+      box-sizing: border-box;
+      min-height: 42px;
+      padding: 8px 10px;
+      font: 14px Arial, sans-serif;
+    }
+
+    .searchRow button,
+    .controls button {
+      padding: 8px 12px;
+      font: 14px Arial, sans-serif;
+      cursor: pointer;
+      min-height: 40px;
+    }
+
+    #suggestions {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 100%;
+      background: #fff;
+      border: 1px solid #bbb;
+      border-top: none;
+      z-index: 20;
+      text-align: left;
+      display: none;
+      max-height: 220px;
+      overflow-y: auto;
+    }
+
+    .suggestion {
+      padding: 8px 10px;
+      font: 14px Arial, sans-serif;
+      cursor: pointer;
+      border-top: 1px solid #eee;
+      background: #fff;
+    }
+
+    .suggestion:first-child {
+      border-top: none;
+    }
+
+    .suggestion:hover {
+      background: #f2f2f2;
+    }
+
+    #searchStatus {
+      min-height: 18px;
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+
+    #locationName {
+      font: 18px Arial, sans-serif;
+      margin-bottom: 8px;
+    }
+
+    #loading {
+      min-height: 44px;
+      margin-bottom: 10px;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      font: 15px Arial, sans-serif;
+    }
+
+    .spinner {
+      width: 18px;
+      height: 18px;
+      border: 3px solid #d7d7d7;
+      border-top-color: #444;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+      flex: 0 0 auto;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .stationWrap {
+      min-height: 286px;
+    }
+
+    #station {
+      width: 320px;
+      height: 260px;
+      display: block;
+      margin: 0 auto;
+      background: #fff;
+    }
+
+    #stationMeta {
+      min-height: 20px;
+      margin-top: 4px;
+      font: 13px Arial, sans-serif;
+    }
+
+    .controls {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+      margin: 8px 52px 0;
+    }
+
+    .controls button.active {
+      outline: 2px solid #6a2ca0;
+      outline-offset: -2px;
+    }
+
+    input[type="range"] {
+      width: 100%;
+      margin-top: 10px;
+    }
+
+    .labels {
+      display: grid;
+      grid-template-columns: 1fr 1.35fr 1fr;
+      gap: 8px;
+      margin-top: 6px;
+      font-size: 12px;
+    }
+
+    .labels span {
+      min-height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1.15;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .labels span:nth-child(1) {
+      justify-content: flex-start;
+      text-align: left;
+    }
+
+    .labels span:nth-child(3) {
+      justify-content: flex-end;
+      text-align: right;
+    }
+
+    #sourceRow {
+      margin-top: 8px;
+      font-size: 12px;
+      min-height: 18px;
+    }
+
+    #sourceRow a {
+      color: #1155cc;
+      text-decoration: none;
+    }
+
+    #sourceRow a:hover {
+      text-decoration: underline;
+    }
+
+    #pressureWrap {
+      margin-top: 14px;
+      text-align: left;
+    }
+
+    #pressureWrap h3 {
+      font-size: 14px;
+      margin: 0 0 6px;
+    }
+
+    #pressureTable {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    #pressureTable th,
+    #pressureTable td {
+      border: 1px solid #bbb;
+      padding: 6px 8px;
+      vertical-align: top;
+    }
+
+    #pressureTable th {
+      background: #efefef;
+    }
+
+    #pressureTable td:nth-child(1) {
+      white-space: nowrap;
+    }
+  </style>
 </head>
+
 <body>
-
-<div class="wrap">
-  <div class="searchRow">
-    <div class="searchWrap">
-      <input id="addressInput" type="text" placeholder="Search address" autocomplete="off">
-      <div id="suggestions"></div>
+  <div class="wrap">
+    <div class="searchRow">
+      <div class="searchWrap">
+        <input id="addressInput" type="text" placeholder="Search address" autocomplete="off">
+        <div id="suggestions"></div>
+      </div>
+      <button id="loadBtn" type="button">Load Location</button>
     </div>
-    <button id="loadBtn" type="button">Load Location</button>
+
+    <div id="searchStatus"></div>
+    <div id="locationName"></div>
+    <div id="loading"><span class="spinner" aria-hidden="true"></span><span id="loadingText">Loading</span></div>
+
+    <div class="stationWrap">
+      <canvas id="station" width="320" height="260" aria-label="Station model canvas"></canvas>
+      <div id="stationMeta"></div>
+    </div>
+
+    <div class="controls">
+      <button id="backFastBtn" type="button">&lt;&lt;</button>
+      <button id="backBtn" type="button">&lt;</button>
+      <button id="playPauseBtn" type="button">Animate</button>
+      <button id="forwardBtn" type="button">&gt;</button>
+      <button id="forwardFastBtn" type="button">&gt;&gt;</button>
+    </div>
+
+    <input id="timeSlider" type="range">
+
+    <div class="labels">
+      <span id="startLabel"></span>
+      <span id="selectedLabel"></span>
+      <span id="endLabel"></span>
+    </div>
+
+    <div id="sourceRow">Source: <a id="sourceLink" href="#" target="_blank" rel="noopener noreferrer">NOAA/NWS</a></div>
+
+    <div id="pressureWrap">
+      <h3>Observed pressure table</h3>
+      <table id="pressureTable">
+        <thead>
+          <tr>
+            <th>Timestamp</th>
+            <th>Pressure</th>
+            <th>Source</th>
+          </tr>
+        </thead>
+        <tbody id="pressureTableBody"></tbody>
+      </table>
+    </div>
   </div>
 
-  <div id="searchStatus"></div>
-  <div id="locationName"></div>
-  <div id="loading">Loading</div>
+  <script>
+    const STORAGE_KEY = "nwsStationModelLocation";
+    const APP_HEADERS = { Accept: "application/geo+json" };
+    const HOUR_MS = 3600000;
+    const DAY_MS = 86400000;
 
-  <svg id="station" viewBox="0 0 320 260" aria-label="Forecast station model"></svg>
-
-  <input id="timeSlider" type="range">
-
-  <div class="labels">
-    <span id="startLabel"></span>
-    <span id="selectedLabel"></span>
-    <span id="endLabel"></span>
-  </div>
-</div>
-
-<script>
-let hourlyForecast = null;
-let gridForecast = null;
-let pressureSeries = [];
-let pendingLocation = null;
-let searchTimer = null;
-let searchAbort = null;
-
-const STORAGE_KEY = "nwsStationModelLocation";
-
-const DEFAULT_LOCATION = {
-  name: "South Lewis Central School High School, Turin, NY",
-  lat: 43.6359,
-  lon: -75.3937
-};
-
-const $ = id => document.getElementById(id);
-
-const station = $("station");
-const slider = $("timeSlider");
-const startLabel = $("startLabel");
-const selectedLabel = $("selectedLabel");
-const endLabel = $("endLabel");
-const loading = $("loading");
-const locationName = $("locationName");
-const searchStatus = $("searchStatus");
-const loadBtn = $("loadBtn");
-const addressInput = $("addressInput");
-const suggestions = $("suggestions");
-
-const dirMap = {
-  N:0, NNE:22.5, NE:45, ENE:67.5, E:90, ESE:112.5, SE:135, SSE:157.5,
-  S:180, SSW:202.5, SW:225, WSW:247.5, W:270, WNW:292.5, NW:315, NNW:337.5
-};
-
-function fmt(t){
-  return new Date(+t).toLocaleString([], {month:"short", day:"numeric", hour:"numeric"});
-}
-function cToF(c){
-  return c == null ? null : Math.round(c * 9 / 5 + 32);
-}
-function parseDurationMs(d){
-  const m = String(d || "").match(/^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/);
-  if (!m) return 0;
-  return ((+m[1]||0)*86400000) + ((+m[2]||0)*3600000) + ((+m[3]||0)*60000) + ((+m[4]||0)*1000);
-}
-function parseValidTime(vt){
-  const [start, dur="PT0H"] = String(vt || "").split("/");
-  const s = Date.parse(start);
-  const d = parseDurationMs(dur) || 3600000;
-  return {start:s, end:s+d, durationMs:d};
-}
-function props(){
-  return gridForecast?.properties || {};
-}
-function layer(...names){
-  const p = props();
-  for (const n of names) if (p[n]?.values?.length) return p[n];
-  return null;
-}
-function layerRegex(re, excludeRe){
-  const p = props();
-  for (const k of Object.keys(p)){
-    if (excludeRe && excludeRe.test(k)) continue;
-    if (re.test(k) && p[k]?.values?.length) return p[k];
-  }
-  return null;
-}
-function qpfLayer(){
-  return (
-    layer("quantitativePrecipitation") ||
-    layerRegex(/quantitativePrecipitation|precip/i, /probability|snow|ice/i)
-  );
-}
-function gridValue(layerObj, t){
-  const vals = layerObj?.values;
-  if (!vals?.length) return null;
-  let nearest = null, bestDiff = Infinity;
-  for (const v of vals){
-    if (v.value == null) continue;
-    const {start, end} = parseValidTime(v.validTime);
-    if (t >= start && t < end) return v.value;
-    const diff = Math.abs(start - t);
-    if (diff < bestDiff){
-      bestDiff = diff;
-      nearest = v.value;
-    }
-  }
-  return nearest;
-}
-function gridIntervals(layerObj){
-  return (layerObj?.values || []).filter(v => v.value != null).map(v => {
-    const {start, end, durationMs} = parseValidTime(v.validTime);
-    return {start, end, durationMs, value:v.value};
-  });
-}
-function integrateLayer(layerObj, t0, t1){
-  let total = 0;
-  for (const it of gridIntervals(layerObj)){
-    const overlap = Math.max(0, Math.min(t1, it.end) - Math.max(t0, it.start));
-    if (!overlap || !it.durationMs) continue;
-    total += it.value * (overlap / it.durationMs);
-  }
-  return total;
-}
-function nearestPeriod(t){
-  const periods = hourlyForecast.properties.periods;
-  let best = periods[0], bestDiff = Infinity;
-  for (const p of periods){
-    const diff = Math.abs(Date.parse(p.startTime) - t);
-    if (diff < bestDiff){
-      bestDiff = diff;
-      best = p;
-    }
-  }
-  return best;
-}
-function dewpointFromTRH(tempF, rh){
-  if (tempF == null || rh == null) return null;
-  const t = (tempF - 32) * 5 / 9;
-  const a = 17.625, b = 243.04;
-  const g = Math.log(rh / 100) + (a * t) / (b + t);
-  return Math.round((((b * g) / (a - g)) * 9 / 5) + 32);
-}
-function pressureCodeFromHpa(hPa){
-  if (hPa == null || !isFinite(hPa)) return "///";
-  return String(Math.round(hPa * 10)).slice(-3).padStart(3, "0");
-}
-function inHgToHpa(inHg){
-  return inHg * 33.8638866667;
-}
-function parseDwmlPressure(xmlText){
-  const xml = new DOMParser().parseFromString(xmlText, "application/xml");
-  if (xml.querySelector("parsererror")) return [];
-
-  const layouts = {};
-  xml.querySelectorAll("time-layout").forEach(node => {
-    const key = node.querySelector("layout-key")?.textContent?.trim();
-    if (!key) return;
-
-    const starts = [...node.querySelectorAll("start-valid-time")].map(n => Date.parse(n.textContent.trim()));
-    const ends = [...node.querySelectorAll("end-valid-time")].map(n => Date.parse(n.textContent.trim()));
-
-    layouts[key] = starts.map((start, i) => ({
-      start,
-      end: Number.isFinite(ends[i]) ? ends[i] : start + 3600000
-    }));
-  });
-
-  const pressureNode = [...xml.querySelectorAll('pressure[type="barometer"]')][0];
-  if (!pressureNode) return [];
-
-  const layoutKey = pressureNode.getAttribute("time-layout");
-  const slots = layouts[layoutKey] || [];
-  const values = [...pressureNode.querySelectorAll("value")].map(v => v.textContent.trim());
-
-  return slots.map((slot, i) => {
-    const raw = values[i];
-    if (!raw || raw === "NA") return null;
-    const inHg = parseFloat(raw);
-    if (!isFinite(inHg)) return null;
-    return {
-      start: slot.start,
-      end: slot.end,
-      inHg,
-      hPa: inHgToHpa(inHg)
+    const DEFAULT_LOCATION = {
+      name: "South Lewis Central School High School, Turin, NY",
+      lat: 43.6359,
+      lon: -75.3937
     };
-  }).filter(Boolean);
-}
-function pressureHpaAt(t){
-  if (!pressureSeries.length) return null;
 
-  let nearest = null;
-  let bestDiff = Infinity;
+    const SYMBOL_SPRITES = {
+      image: "symbols.png",
+      presentWeather: {
+        rain_light: {
+          rect: [30, 214, 30, 30],
+          labels: ["light rain", "rain light", "-ra", "light showers"]
+        },
+        rain_moderate: {
+          rect: [48, 214, 30, 32],
+          labels: ["rain", "moderate rain", "ra", "rain showers"]
+        },
+        rain_heavy: {
+          rect: [70, 210, 34, 38],
+          labels: ["heavy rain", "+ra", "downpour"]
+        },
+        snow_light: {
+          rect: [30, 250, 30, 34],
+          labels: ["light snow", "-sn", "light flurries"]
+        },
+        snow_moderate: {
+          rect: [48, 248, 30, 38],
+          labels: ["snow", "moderate snow", "sn", "flurries"]
+        },
+        snow_heavy: {
+          rect: [70, 248, 34, 38],
+          labels: ["heavy snow", "+sn"]
+        },
+        thunder_rain: {
+          rect: [30, 300, 33, 42],
+          labels: ["thunder rain", "thunderstorm", "tsra", "thunder with rain"]
+        },
+        thunder_snow: {
+          rect: [48, 300, 32, 42],
+          labels: ["thunder snow", "thundersnow", "thunder with snow"]
+        },
+        thunder_plain: {
+          rect: [72, 300, 32, 42],
+          labels: ["thunder", "tstorm", "ts"]
+        },
+        shower_rain: {
+          rect: [48, 347, 26, 43],
+          labels: ["rain shower", "rain showers", "showers"]
+        },
+        shower_snow: {
+          rect: [77, 347, 27, 43],
+          labels: ["snow shower", "snow showers"]
+        },
+        drizzle: {
+          rect: [80, 388, 26, 22],
+          labels: ["drizzle", "dz"]
+        },
+        freezing: {
+          rect: [45, 418, 60, 23],
+          labels: ["freezing rain", "freezing drizzle", "fzra", "fzdz"]
+        },
+        ice_pellets: {
+          rect: [82, 446, 24, 24],
+          labels: ["ice pellets", "sleet", "pl"]
+        },
+        fog_shallow: {
+          rect: [44, 486, 26, 23],
+          labels: ["fog", "mist", "br"]
+        },
+        fog_deep: {
+          rect: [76, 486, 29, 23],
+          labels: ["dense fog", "deep fog"]
+        },
+        haze: {
+          rect: [80, 516, 31, 18],
+          labels: ["haze", "hz"]
+        },
+        areas_precip: {
+          rect: [40, 545, 60, 48],
+          labels: ["areas of precipitation", "areas precip"]
+        }
+      },
+      cloudType: {
+        cumulus_fair: {
+          rect: [378, 37, 42, 28],
+          labels: ["cumulus", "fair weather cumulus"]
+        },
+        stratocumulus: {
+          rect: [378, 86, 44, 21],
+          labels: ["stratocumulus"]
+        },
+        fractocumulus_bad: {
+          rect: [378, 117, 45, 17],
+          labels: ["fractocumulus", "fracto"]
+        },
+        stratus_fair: {
+          rect: [378, 149, 44, 16],
+          labels: ["stratus"]
+        },
+        altostratus_thin_layer: {
+          rect: [378, 240, 50, 29],
+          labels: ["thin altostratus layer", "altostratus"]
+        },
+        altostratus_thick_layer: {
+          rect: [378, 270, 53, 30],
+          labels: ["thick altostratus layer", "dense altostratus"]
+        },
+        altostratus_patches: {
+          rect: [378, 302, 47, 31],
+          labels: ["altostratus patches", "patchy altostratus"]
+        },
+        altostratus_bands: {
+          rect: [378, 334, 55, 32],
+          labels: ["altostratus bands", "banded altostratus"]
+        },
+        cirrus_scattered: {
+          rect: [378, 438, 44, 18],
+          labels: ["scattered cirrus"]
+        },
+        cirrus_dense_patches: {
+          rect: [378, 468, 52, 21],
+          labels: ["dense cirrus", "dense cirrus patches"]
+        },
+        cirrus_veil: {
+          rect: [378, 501, 52, 20],
+          labels: ["veil of cirrus", "cirrus veil", "cirrostratus"]
+        },
+        cirrus_not_covering: {
+          rect: [378, 534, 52, 19],
+          labels: ["cirrus", "cirrus not covering entire sky"]
+        }
+      }
+    };
+    window.STATION_SYMBOL_SPRITES = SYMBOL_SPRITES;
 
-  for (const p of pressureSeries){
-    if (t >= p.start && t < p.end) return p.hPa;
-    const diff = Math.abs(p.start - t);
-    if (diff < bestDiff){
-      bestDiff = diff;
-      nearest = p.hPa;
-    }
-  }
-  return nearest;
-}
-function pressureTrend(t){
-  const now = pressureHpaAt(t);
-  const prev = pressureHpaAt(t - 3 * 3600000);
+    let hourlyForecast = null;
+    let gridForecast = null;
+    let stationInfo = null;
+    let observations = [];
+    let observationHourMap = new Map();
+    let forecastHourMap = new Map();
+    let timeline = [];
+    let pendingLocation = null;
+    let searchTimer = null;
+    let searchAbort = null;
+    let playbackTimer = null;
+    let lastPlaybackMode = { dir: 1, intervalMs: 1000 };
+    let currentLoadToken = 0;
+    let currentLocation = null;
 
-  if (now == null || prev == null){
-    return {num:"", svg:""};
-  }
+    const $ = id => document.getElementById(id);
+    const stationCanvas = $("station");
+    const ctx = stationCanvas.getContext("2d");
+    const slider = $("timeSlider");
+    const startLabel = $("startLabel");
+    const selectedLabel = $("selectedLabel");
+    const endLabel = $("endLabel");
+    const loading = $("loading");
+    const loadingText = $("loadingText");
+    const locationName = $("locationName");
+    const searchStatus = $("searchStatus");
+    const loadBtn = $("loadBtn");
+    const addressInput = $("addressInput");
+    const suggestions = $("suggestions");
+    const backFastBtn = $("backFastBtn");
+    const backBtn = $("backBtn");
+    const playPauseBtn = $("playPauseBtn");
+    const forwardBtn = $("forwardBtn");
+    const forwardFastBtn = $("forwardFastBtn");
+    const sourceLink = $("sourceLink");
+    const stationMeta = $("stationMeta");
+    const pressureTableBody = $("pressureTableBody");
 
-  const delta = now - prev;
-  const num = String(Math.round(Math.abs(delta) * 10));
-
-  let svg = '<line x1="205" y1="140" x2="228" y2="140" stroke="#000" stroke-width="3"/>';
-  if (delta > 0.05){
-    svg = '<polyline points="205,146 216,134 228,134" fill="none" stroke="#000" stroke-width="3"/>';
-  } else if (delta < -0.05){
-    svg = '<polyline points="205,134 216,146 228,146" fill="none" stroke="#000" stroke-width="3"/>';
-  }
-
-  return {num, svg};
-}
-function precipInches3h(t){
-  const qpf = qpfLayer();
-  if (!qpf) return "";
-  const amt = integrateLayer(qpf, t - 3 * 3600000, t);
-  const u = String(qpf.uom || "");
-  let inches = amt;
-  if (u.includes(":mm") || /\bmm\b/.test(u)) inches = amt / 25.4;
-  else if (u.includes(":m") || /\bm\b/.test(u)) inches = amt * 39.3701;
-  else if (u.includes("inch")) inches = amt;
-  if (!isFinite(inches) || inches <= 0.001) return "0.00";
-  return inches.toFixed(2);
-}
-function weatherCode(text){
-  text = String(text || "").toUpperCase();
-  if (text.includes("THUNDER")) return "TS";
-  if (text.includes("FREEZING RAIN")) return "FZRA";
-  if (text.includes("SLEET") || text.includes("ICE PELLETS")) return "PL";
-  if (text.includes("SNOW") || text.includes("FLURRIES")) return "SN";
-  if (text.includes("RAIN") || text.includes("SHOWERS") || text.includes("DRIZZLE")) return "RA";
-  if (text.includes("FOG") || text.includes("MIST")) return "FG";
-  return "";
-}
-function skyCoverPct(period, t){
-  const v = gridValue(layer("skyCover"), t);
-  if (v != null) return v;
-  const text = String(period.shortForecast || "").toUpperCase();
-  if (text.includes("OVERCAST")) return 100;
-  if (text.includes("MOSTLY CLOUDY")) return 75;
-  if (text.includes("PARTLY CLOUDY")) return 50;
-  if (text.includes("MOSTLY SUNNY")) return 25;
-  if (text.includes("SUNNY") || text.includes("CLEAR")) return 0;
-  if (text.includes("CLOUDY")) return 100;
-  return 0;
-}
-function skySvg(p){
-  const open = '<circle cx="160" cy="130" r="18" fill="#fff" stroke="#000" stroke-width="3"/>';
-  if (p >= 87) return '<circle cx="160" cy="130" r="18" fill="#000" stroke="#000" stroke-width="3"/>';
-  if (p >= 62) return '<circle cx="160" cy="130" r="18" fill="#000"/><path d="M160 130 L160 112 A18 18 0 0 1 178 130 Z" fill="#fff"/><circle cx="160" cy="130" r="18" fill="none" stroke="#000" stroke-width="3"/>';
-  if (p >= 37) return '<path d="M160 112 A18 18 0 0 1 160 148 L160 130 Z" fill="#000"/><circle cx="160" cy="130" r="18" fill="none" stroke="#000" stroke-width="3"/>';
-  if (p >= 12) return open + '<path d="M160 130 L160 112 A18 18 0 0 1 178 130 Z" fill="#000"/>';
-  return open;
-}
-function gridWindKt(t){
-  const w = layer("windSpeed");
-  const v = gridValue(w, t);
-  if (v == null) return null;
-  const u = String(w?.uom || "");
-  if (u.includes("km_h-1")) return Math.round(v * 0.539957);
-  if (u.includes("m_s-1"))  return Math.round(v * 1.94384);
-  if (u.includes("mi_h-1")) return Math.round(v * 0.868976);
-  if (u.includes("kt"))     return Math.round(v);
-  return Math.round(v);
-}
-function gridWindDeg(t){
-  const v = gridValue(layer("windDirection"), t);
-  if (v == null || isNaN(v)) return null;
-  return ((+v % 360) + 360) % 360;
-}
-function degFromCardinal(s){
-  return dirMap[String(s || "").toUpperCase()] ?? null;
-}
-function parseSpeedKt(s){
-  const nums = String(s || "").match(/\d+(\.\d+)?/g)?.map(Number) || [];
-  if (!nums.length) return 0;
-  return Math.round((nums.reduce((a,b)=>a+b,0) / nums.length) * 0.868976);
-}
-function windSvg(dir, kt){
-  if (kt == null || kt < 3) return '<circle cx="160" cy="130" r="2" fill="#000"/>';
-
-  let rem = Math.round(kt / 5) * 5;
-  const x = 160;
-  const yCenter = 130;
-  const yTip = 70;
-  let cursor = yTip;
-  let placedAnything = false;
-
-  let s = `<g transform="rotate(${dir} 160 130)" stroke="#000" stroke-width="3" fill="#000" stroke-linecap="round" stroke-linejoin="round">
-    <line x1="${x}" y1="${yCenter}" x2="${x}" y2="${yTip}"/>`;
-
-  while (rem >= 50){
-    s += `<polygon points="${x},${cursor} ${x+22},${cursor} ${x},${cursor+12}"/>`;
-    cursor += 14;
-    rem -= 50;
-    placedAnything = true;
-  }
-
-  while (rem >= 10){
-    s += `<line x1="${x}" y1="${cursor}" x2="${x+20}" y2="${cursor-8}"/>`;
-    cursor += 10;
-    rem -= 10;
-    placedAnything = true;
-  }
-
-  if (rem >= 5){
-    const y = placedAnything ? cursor : yTip + 10;
-    s += `<line x1="${x}" y1="${y}" x2="${x+12}" y2="${y-5}"/>`;
-  }
-
-  return s + `</g>`;
-}
-function render(t){
-  const p = nearestPeriod(t);
-  const temp = p.temperature ?? cToF(gridValue(layer("temperature"), t));
-  const rh = p.relativeHumidity?.value ?? gridValue(layer("relativeHumidity"), t);
-  const dpC = p.dewpoint?.value ?? gridValue(layer("dewpoint"), t);
-  const dpt = dpC != null ? cToF(dpC) : dewpointFromTRH(temp, rh);
-  const windKt = gridWindKt(t) ?? parseSpeedKt(p.windSpeed);
-  const windDir = gridWindDeg(t) ?? degFromCardinal(p.windDirection) ?? 0;
-  const pressure = pressureCodeFromHpa(pressureHpaAt(t));
-  const trend = pressureTrend(t);
-  const wx = weatherCode(p.shortForecast);
-  const visM = gridValue(layer("visibility"), t);
-  const vis = visM == null ? "" : (visM / 1609.344).toFixed(1).replace(/\.0$/,"");
-  const pcp3 = precipInches3h(t);
-  const sky = skyCoverPct(p, t);
-
-  selectedLabel.textContent = fmt(Date.parse(p.startTime));
-  station.innerHTML = `
-    <text x="70" y="95">${temp ?? ""}</text>
-    <text x="70" y="215">${dpt ?? ""}</text>
-    <text x="30" y="145">${vis}</text>
-    <text x="104" y="145">${wx}</text>
-    <text x="210" y="95">${pressure}</text>
-    ${trend.svg}
-    <text x="234" y="145" class="small">${trend.num}</text>
-    <text x="220" y="215" class="small">${pcp3}</text>
-    ${skySvg(sky)}
-    ${windSvg(windDir, windKt)}
-  `;
-  loading.style.display = "none";
-}
-function setLocationTitle(name){
-  locationName.textContent = name || "";
-}
-function setLoading(msg){
-  loading.textContent = msg || "Loading";
-  loading.style.display = "block";
-}
-function saveLocation(loc){
-  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(loc)); }catch(e){}
-}
-function getSavedLocation(){
-  try{ return JSON.parse(localStorage.getItem(STORAGE_KEY)); }catch(e){ return null; }
-}
-function clearSuggestions(){
-  suggestions.innerHTML = "";
-  suggestions.style.display = "none";
-}
-function showSuggestions(items){
-  suggestions.innerHTML = "";
-  if (!items.length){
-    clearSuggestions();
-    return;
-  }
-  for (const item of items){
-    const div = document.createElement("div");
-    div.className = "suggestion";
-    div.textContent = item.display_name;
-    div.addEventListener("mousedown", () => {
-      pendingLocation = {
-        name: item.display_name,
-        lat: parseFloat(item.lat),
-        lon: parseFloat(item.lon)
-      };
-      addressInput.value = pendingLocation.name;
-      searchStatus.textContent = `Selected: ${pendingLocation.name}`;
-      clearSuggestions();
+    const spriteAtlas = new Image();
+    let spriteAtlasReady = false;
+    spriteAtlas.addEventListener("load", () => {
+      spriteAtlasReady = true;
+      if (timeline.length) renderByIndex(Number(slider.value || 0));
     });
-    suggestions.appendChild(div);
-  }
-  suggestions.style.display = "block";
-}
-async function searchAddresses(q){
-  if (searchAbort) searchAbort.abort();
-  searchAbort = new AbortController();
+    spriteAtlas.src = SYMBOL_SPRITES.image;
 
-  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=5&countrycodes=us&q=${encodeURIComponent(q)}`;
+    function fmt(t) {
+      return new Date(+t).toLocaleString([], { month: "short", day: "numeric", hour: "numeric" });
+    }
+    function fmtLong(t) {
+      return new Date(+t).toLocaleString([], {
+        year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit"
+      });
+    }
+    function isoNoMillis(t) {
+      return new Date(t).toISOString().replace(/\.\d{3}Z$/, "Z");
+    }
+    function floorHour(t) {
+      const d = new Date(t);
+      d.setMinutes(0, 0, 0);
+      return d.getTime();
+    }
+    function cToF(c) {
+      return c == null ? null : Math.round(c * 9 / 5 + 32);
+    }
+    function mpsToKt(v) {
+      return v == null ? null : Math.round(v * 1.94384449);
+    }
+    function mToMiles(v) {
+      return v == null ? null : v / 1609.344;
+    }
+    function paToHpa(v) {
+      return v == null ? null : v / 100;
+    }
+    function qvValue(obj) {
+      return typeof obj?.value === "number" && Number.isFinite(obj.value) ? obj.value : null;
+    }
+    function parseDurationMs(d) {
+      const m = String(d || "").match(/^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/);
+      if (!m) return 0;
+      return ((+m[1] || 0) * 86400 + (+m[2] || 0) * 3600 + (+m[3] || 0) * 60 + (+m[4] || 0)) * 1000;
+    }
+    function haversineKm(lat1, lon1, lat2, lon2) {
+      const R = 6371;
+      const toRad = d => d * Math.PI / 180;
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
+      const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(a));
+    }
+    function normalizeText(...parts) {
+      return parts.filter(Boolean).join(" ").toLowerCase().replace(/[_/]+/g, " ").replace(/\s+/g, " ").trim();
+    }
+    function pressureCodeFromHpa(hPa) {
+      if (hPa == null || !isFinite(hPa)) return "///";
+      return String(Math.round(hPa * 10)).slice(-3).padStart(3, "0");
+    }
+    function forecastSourceUrl(loc) {
+      return `https://forecast.weather.gov/MapClick.php?lat=${loc.lat}&lon=${loc.lon}&unit=0&lg=english&FcstType=graphical`;
+    }
+    function setForecastSource(loc) {
+      sourceLink.href = forecastSourceUrl(loc);
+    }
+    function setLocationTitle(name) {
+      locationName.textContent = name || "";
+    }
+    function setLoading(msg, show = true) {
+      loadingText.textContent = msg || "Loading";
+      loading.style.display = show ? "flex" : "none";
+    }
+    function saveLocation(loc) {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(loc)); } catch (e) { }
+    }
+    function getSavedLocation() {
+      try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch (e) { return null; }
+    }
+    function clearSuggestions() {
+      suggestions.innerHTML = "";
+      suggestions.style.display = "none";
+    }
+    function showSuggestions(items) {
+      suggestions.innerHTML = "";
+      if (!items.length) {
+        clearSuggestions();
+        return;
+      }
+      for (const item of items) {
+        const div = document.createElement("div");
+        div.className = "suggestion";
+        div.textContent = item.display_name;
+        div.addEventListener("mousedown", () => {
+          pendingLocation = {
+            name: item.display_name,
+            lat: parseFloat(item.lat),
+            lon: parseFloat(item.lon)
+          };
+          addressInput.value = pendingLocation.name;
+          searchStatus.textContent = `Selected: ${pendingLocation.name}`;
+          clearSuggestions();
+        });
+        suggestions.appendChild(div);
+      }
+      suggestions.style.display = "block";
+    }
+    async function searchAddresses(q) {
+      if (searchAbort) searchAbort.abort();
+      searchAbort = new AbortController();
+      const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=5&countrycodes=us&q=${encodeURIComponent(q)}`;
+      try {
+        const data = await fetch(url, {
+          signal: searchAbort.signal,
+          headers: { Accept: "application/json" }
+        }).then(r => r.json());
+        showSuggestions(Array.isArray(data) ? data : []);
+      } catch (e) {
+        if (e.name !== "AbortError") clearSuggestions();
+      }
+    }
+    async function fetchJson(url) {
+      const r = await fetch(url, { headers: APP_HEADERS });
+      if (!r.ok) throw new Error(`${r.status} ${url}`);
+      return r.json();
+    }
+    function chooseNearestStation(stationsFc, loc) {
+      const feats = Array.isArray(stationsFc?.features) ? stationsFc.features : [];
+      let best = null;
+      let bestKm = Infinity;
+      for (const f of feats) {
+        const coords = f?.geometry?.coordinates;
+        if (!Array.isArray(coords) || coords.length < 2) continue;
+        const km = haversineKm(loc.lat, loc.lon, coords[1], coords[0]);
+        if (km < bestKm) {
+          bestKm = km;
+          best = f;
+        }
+      }
+      return best;
+    }
+    function observationWeatherText(rec) {
+      const parts = [];
+      for (const item of rec?.presentWeather || []) {
+        if (item?.rawString) parts.push(item.rawString);
+        if (item?.weather) parts.push(item.weather);
+        if (item?.modifier) parts.push(item.modifier);
+        if (item?.intensity) parts.push(item.intensity);
+        if (item?.phenomenon) parts.push(item.phenomenon);
+      }
+      if (rec?.textDescription) parts.push(rec.textDescription);
+      if (rec?.rawMessage) parts.push(rec.rawMessage);
+      return normalizeText(...parts);
+    }
+    function observationCloudTypeText(rec) {
+      const raw = normalizeText(rec?.textDescription, rec?.rawMessage);
+      return raw;
+    }
+    function inferReportType(raw) {
+      const s = String(raw || "").trim().toUpperCase();
+      if (s.startsWith("SPECI")) return "SPECI";
+      if (s.startsWith("METAR")) return "METAR";
+      return "";
+    }
+    function obsFeatureToRecord(feature) {
+      const p = feature?.properties || {};
+      const timestamp = Date.parse(p.timestamp);
+      if (!Number.isFinite(timestamp)) return null;
+      return {
+        timestamp,
+        textDescription: p.textDescription || "",
+        presentWeather: p.presentWeather || [],
+        cloudLayers: p.cloudLayers || [],
+        temperatureF: cToF(qvValue(p.temperature)),
+        dewpointF: cToF(qvValue(p.dewpoint)),
+        relativeHumidity: qvValue(p.relativeHumidity) != null ? Math.round(qvValue(p.relativeHumidity)) : null,
+        windDirection: qvValue(p.windDirection),
+        windKt: mpsToKt(qvValue(p.windSpeed)),
+        windGustKt: mpsToKt(qvValue(p.windGust)),
+        visibilityMi: mToMiles(qvValue(p.visibility)),
+        pressureHpa: paToHpa(qvValue(p.seaLevelPressure) ?? qvValue(p.barometricPressure)),
+        rawMessage: p.rawMessage || "",
+        reportType: inferReportType(p.rawMessage),
+        weatherText: "",
+        cloudTypeText: ""
+      };
+    }
+    function buildObservationHourMap(records, startHour, endHour) {
+      const map = new Map();
+      for (let hour = startHour; hour <= endHour; hour += HOUR_MS) {
+        let best = null;
+        let bestScore = Infinity;
+        for (const rec of records) {
+          const diff = Math.abs(rec.timestamp - hour);
+          if (diff > 70 * 60000) continue;
+          const reportPenalty = rec.reportType === "METAR" ? 0 : rec.reportType === "SPECI" ? 0.3 : 0.6;
+          const dataPenalty = (rec.pressureHpa == null ? 0.15 : 0) + (rec.windKt == null ? 0.15 : 0);
+          const score = diff / 60000 + reportPenalty + dataPenalty;
+          if (score < bestScore) {
+            best = rec;
+            bestScore = score;
+          }
+        }
+        if (best) map.set(hour, best);
+      }
+      return map;
+    }
+    function observationAt(t) {
+      return observationHourMap.get(floorHour(t)) || null;
+    }
+    function parseGridLayer(obj) {
+      if (!obj || !Array.isArray(obj.values)) return [];
+      const out = [];
+      for (const it of obj.values) {
+        if (!it?.validTime) continue;
+        const parts = String(it.validTime).split("/");
+        const start = Date.parse(parts[0]);
+        const durationMs = parseDurationMs(parts[1] || "PT0H");
+        if (!Number.isFinite(start)) continue;
+        out.push({
+          start,
+          end: start + durationMs,
+          durationMs,
+          value: it.value
+        });
+      }
+      return out;
+    }
+    function layer(name) {
+      const obj = gridForecast?.properties?.[name];
+      if (!obj) return null;
+      return { ...obj, _values: parseGridLayer(obj) };
+    }
+    function gridValue(layerObj, t) {
+      if (!layerObj?._values?.length) return null;
+      for (const it of layerObj._values) {
+        if (t >= it.start && t < it.end) return it.value;
+      }
+      return null;
+    }
+    function integrateLayer(layerObj, t0, t1) {
+      if (!layerObj?._values?.length) return null;
+      let total = 0;
+      let touched = false;
+      for (const it of layerObj._values) {
+        const overlap = Math.max(0, Math.min(t1, it.end) - Math.max(t0, it.start));
+        if (!overlap || !it.durationMs || it.value == null) continue;
+        total += it.value * (overlap / it.durationMs);
+        touched = true;
+      }
+      return touched ? total : null;
+    }
+    function qpfLayer() {
+      return layer("quantitativePrecipitation") || layer("probabilityOfPrecipitation");
+    }
+    function precipInches3h(t) {
+      const qpf = layer("quantitativePrecipitation");
+      if (!qpf) return "";
+      const amt = integrateLayer(qpf, t - 3 * HOUR_MS, t);
+      const u = String(qpf.uom || "").toLowerCase();
+      let inches = amt;
+      if (amt == null) return "";
+      if (u.includes(":mm") || /\bmm\b/.test(u)) inches = amt / 25.4;
+      else if (u.includes(":m") || /\bm\b/.test(u)) inches = amt * 39.3701;
+      else if (u.includes("inch")) inches = amt;
+      if (!isFinite(inches) || inches <= 0.001) return "0.00";
+      return inches.toFixed(2);
+    }
+    function buildForecastHourMap() {
+      forecastHourMap = new Map();
+      const periods = hourlyForecast?.properties?.periods || [];
+      for (const p of periods) {
+        forecastHourMap.set(floorHour(Date.parse(p.startTime)), p);
+      }
+    }
+    function forecastPeriodAt(t) {
+      const hour = floorHour(t);
+      return forecastHourMap.get(hour) || null;
+    }
+    function skyCoverFromText(text) {
+      text = String(text || "").toUpperCase();
+      if (text.includes("OVERCAST")) return 100;
+      if (text.includes("BROKEN")) return 87;
+      if (text.includes("MOSTLY CLOUDY")) return 75;
+      if (text.includes("PARTLY CLOUDY")) return 50;
+      if (text.includes("SCATTERED")) return 45;
+      if (text.includes("FEW")) return 25;
+      if (text.includes("MOSTLY SUNNY")) return 25;
+      if (text.includes("SUNNY") || text.includes("CLEAR") || text.includes("SKC")) return 0;
+      if (text.includes("CLOUDY")) return 100;
+      return 0;
+    }
+    function observationSkyCover(rec) {
+      if (Array.isArray(rec?.cloudLayers) && rec.cloudLayers.length) {
+        const covers = rec.cloudLayers.map(l => String(l?.amount || "").toUpperCase());
+        if (covers.includes("OVC")) return 100;
+        if (covers.includes("BKN")) return 87;
+        if (covers.includes("SCT")) return 50;
+        if (covers.includes("FEW")) return 25;
+        if (covers.includes("SKC") || covers.includes("CLR")) return 0;
+      }
+      return skyCoverFromText(rec?.textDescription);
+    }
+    function skyCoverPct(period, t, obsRec) {
+      if (obsRec) return observationSkyCover(obsRec);
+      const v = gridValue(layer("skyCover"), t);
+      if (v != null) return v;
+      return skyCoverFromText(period?.shortForecast);
+    }
+    function gridWindKt(t) {
+      const w = layer("windSpeed");
+      const v = gridValue(w, t);
+      if (v == null) return null;
+      const u = String(w?.uom || "");
+      if (u.includes("km_h-1")) return Math.round(v * 0.539957);
+      if (u.includes("m_s-1")) return Math.round(v * 1.94384);
+      if (u.includes("mi_h-1")) return Math.round(v * 0.868976);
+      if (u.includes("kt")) return Math.round(v);
+      return Math.round(v);
+    }
+    function gridWindDeg(t) {
+      const v = gridValue(layer("windDirection"), t);
+      if (v == null || isNaN(v)) return null;
+      return ((+v % 360) + 360) % 360;
+    }
+    function parseSpeedKt(s) {
+      const nums = String(s || "").match(/\d+(\.\d+)?/g)?.map(Number) || [];
+      if (!nums.length) return 0;
+      return Math.round((nums.reduce((a, b) => a + b, 0) / nums.length) * 0.868976);
+    }
+    function degFromCardinal(s) {
+      const dirMap = {
+        N: 0, NNE: 22.5, NE: 45, ENE: 67.5, E: 90, ESE: 112.5, SE: 135, SSE: 157.5,
+        S: 180, SSW: 202.5, SW: 225, WSW: 247.5, W: 270, WNW: 292.5, NW: 315, NNW: 337.5
+      };
+      return dirMap[String(s || "").toUpperCase()] ?? null;
+    }
+    function pressureHpaAt(t) {
+      const obs = observationAt(t);
+      return obs?.pressureHpa ?? null;
+    }
+    function pressureTrendAt(t) {
+      const now = pressureHpaAt(t);
+      const prev = pressureHpaAt(t - 3 * HOUR_MS);
+      if (now == null || prev == null) return { num: "", trend: "steady" };
+      const delta = now - prev;
+      return {
+        num: String(Math.round(Math.abs(delta) * 10)),
+        trend: delta > 0.05 ? "up" : delta < -0.05 ? "down" : "steady"
+      };
+    }
+    function dewpointFromTRH(tempF, rh) {
+      if (tempF == null || rh == null) return null;
+      const t = (tempF - 32) * 5 / 9;
+      const a = 17.625, b = 243.04;
+      const g = Math.log(rh / 100) + (a * t) / (b + t);
+      return Math.round((((b * g) / (a - g)) * 9 / 5) + 32);
+    }
+    function precipitationIntensity(text) {
+      const t = normalizeText(text);
+      if (!t) return "moderate";
 
-  try{
-    const data = await fetch(url, {
-      signal: searchAbort.signal,
-      headers: { "Accept": "application/json" }
-    }).then(r => r.json());
+      let score = 0;
 
-    showSuggestions(Array.isArray(data) ? data : []);
-  }catch(e){
-    if (e.name !== "AbortError") clearSuggestions();
-  }
-}
-async function loadLocation(loc){
-  setLoading("Loading");
-  setLocationTitle(loc.name);
-  searchStatus.textContent = "";
-  slider.disabled = true;
+      if (/heavy|brief heavy|downpour|intense|torrential/.test(t)) score += 3;
+      if (/moderate|periods of|definite|steady/.test(t)) score += 1;
+      if (/light|very light|flurr(?:y|ies)?/.test(t)) score -= 2;
 
-  try{
-    const point = await fetch(`https://api.weather.gov/points/${loc.lat},${loc.lon}`, {
-      headers:{Accept:"application/geo+json"}
-    }).then(r => r.json());
+      if (/slight chance|slight chance of|isolated|patchy|areas of/.test(t)) score -= 2;
+      if (/chance|scattered/.test(t)) score -= 1;
+      if (/likely|numerous|occasional/.test(t)) score += 1;
+      if (/showers likely|snow likely|rain likely/.test(t)) score += 1;
 
-    const hourlyUrl = point.properties.forecastHourly;
-    const gridUrl = point.properties.forecastGridData;
+      if (score <= -2) return "light";
+      if (score >= 3) return "heavy";
+      return "moderate";
+    }
 
-    const [h, g, dwmlText] = await Promise.all([
-      fetch(hourlyUrl, {
-        headers:{Accept:"application/geo+json"}
-      }).then(r => r.json()),
-      fetch(gridUrl, {
-        headers:{Accept:"application/geo+json"}
-      }).then(r => r.json()),
-      fetch(hourlyUrl, {
-        headers:{Accept:"application/vnd.noaa.dwml+xml"}
-      }).then(r => r.text())
-    ]);
+    function chooseWeatherSpriteFromText(text) {
+      const t = normalizeText(text);
+      if (!t) return null;
+      const tokens = t.split(" ");
+      const intensity = precipitationIntensity(t);
 
-    hourlyForecast = h;
-    gridForecast = g;
-    pressureSeries = parseDwmlPressure(dwmlText);
+      if (t.includes("thunder")) {
+        if (t.includes("snow")) return "thunder_snow";
+        if (t.includes("rain") || t.includes("shower") || t.includes("drizzle")) return "thunder_rain";
+        return "thunder_plain";
+      }
+      if (t.includes("freezing rain") || t.includes("freezing drizzle")) return "freezing";
+      if (t.includes("ice pellets") || t.includes("sleet")) return "ice_pellets";
+      if (t.includes("dense fog")) return "fog_deep";
+      if (t.includes("fog") || t.includes("mist")) return "fog_shallow";
+      if (t.includes("haze")) return "haze";
 
-    const periods = hourlyForecast.properties.periods;
-    const first = Date.parse(periods[0].startTime);
-    const last  = Date.parse(periods[periods.length - 1].startTime);
+      if (t.includes("drizzle")) {
+        if (t.includes("freezing")) return "freezing";
+        return "drizzle";
+      }
+      if (t.includes("shower")) {
+        if (t.includes("snow")) return "shower_snow";
+        return "shower_rain";
+      }
+      if (t.includes("snow") || t.includes("flurr")) {
+        if (intensity === "heavy") return "snow_heavy";
+        if (intensity === "light") return "snow_light";
+        return "snow_moderate";
+      }
+      if (t.includes("rain")) {
+        if (intensity === "heavy") return "rain_heavy";
+        if (intensity === "light") return "rain_light";
+        return "rain_moderate";
+      }
 
-    slider.min = first;
-    slider.max = last;
-    slider.step = 3600000;
-    slider.value = first;
-    slider.disabled = false;
+      // Exact label matching after broader precipitation logic so generic labels like
+      // "rain" do not flatten all forecast wording to the same icon.
+      for (const [key, spec] of Object.entries(SYMBOL_SPRITES.presentWeather)) {
+        for (const label of spec.labels) {
+          if (label.includes(" ")) {
+            if (t.includes(label)) return key;
+          } else {
+            if (tokens.includes(label)) return key;
+          }
+        }
+      }
+      return null;
+    }
 
-    startLabel.textContent = fmt(first);
-    endLabel.textContent = fmt(last);
+    function chooseCloudSpriteFromText(text) {
+      const t = normalizeText(text);
+      if (!t) return null;
+      const tokens = t.split(" ");
 
-    render(first);
-    saveLocation(loc);
-  }catch(e){
-    station.innerHTML = "";
-    startLabel.textContent = "";
-    selectedLabel.textContent = "";
-    endLabel.textContent = "";
-    pressureSeries = [];
-    setLoading("Load failed");
-    searchStatus.textContent = "Could not load that location.";
-  }
-}
-function initSearch(){
-  addressInput.addEventListener("input", () => {
-    pendingLocation = null;
-    searchStatus.textContent = "";
-    const q = addressInput.value.trim();
+      // 1. Check against the labels defined in SYMBOL_SPRITES
+      for (const [key, spec] of Object.entries(SYMBOL_SPRITES.cloudType)) {
+        for (const label of spec.labels) {
+          if (label.includes(" ")) {
+            if (t.includes(label)) return key;
+          } else {
+            if (tokens.includes(label)) return key;
+          }
+        }
+      }
 
-    if (searchTimer) clearTimeout(searchTimer);
-    if (q.length < 3){
+      // 2. Fallback to broad substring matching
+      if (t.includes("stratocumulus")) return "stratocumulus";
+      if (t.includes("fractocumulus") || t.includes("fracto")) return "fractocumulus_bad";
+      if (t.includes("cumulus")) return "cumulus_fair";
+      if (t.includes("altostratus")) {
+        if (t.includes("band")) return "altostratus_bands";
+        if (t.includes("patch")) return "altostratus_patches";
+        if (t.includes("thick") || t.includes("dense")) return "altostratus_thick_layer";
+        return "altostratus_thin_layer";
+      }
+      if (t.includes("veil of cirrus") || t.includes("cirrostratus")) return "cirrus_veil";
+      if (t.includes("dense cirrus")) return "cirrus_dense_patches";
+      if (t.includes("scattered cirrus")) return "cirrus_scattered";
+      if (t.includes("cirrus")) return "cirrus_not_covering";
+      if (t.includes("stratus")) return "stratus_fair";
+      return null;
+    }
+    window.pickWeatherSprite = chooseWeatherSpriteFromText;
+    window.pickCloudSprite = chooseCloudSpriteFromText;
+
+    function drawSprite(ctx, category, key, x, y, scale = 1) {
+      if (!spriteAtlasReady || !key) return false;
+      const spec = SYMBOL_SPRITES?.[category]?.[key];
+      if (!spec) return false;
+      const [sx, sy, sw, sh] = spec.rect;
+      const dw = sw * scale;
+      const dh = sh * scale;
+      ctx.drawImage(spriteAtlas, sx, sy, sw, sh, x - dw / 2, y - dh / 2, dw, dh);
+      return true;
+    }
+    function drawText(text, x, y, size = 24, align = "left") {
+      if (text == null || text === "") return;
+      ctx.save();
+      ctx.fillStyle = "#000";
+      ctx.font = `${size}px Arial`;
+      ctx.textAlign = align;
+      ctx.textBaseline = "alphabetic";
+      ctx.fillText(String(text), x, y);
+      ctx.restore();
+    }
+    function drawTrendSymbol(x, y, trend) {
+      ctx.save();
+      ctx.strokeStyle = "#000";
+      ctx.lineWidth = 3;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      if (trend === "up") {
+        ctx.moveTo(x, y + 6);
+        ctx.lineTo(x + 11, y - 6);
+        ctx.lineTo(x + 23, y - 6);
+      } else if (trend === "down") {
+        ctx.moveTo(x, y - 6);
+        ctx.lineTo(x + 11, y + 6);
+        ctx.lineTo(x + 23, y + 6);
+      } else {
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + 23, y);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+    function drawSkyCover(x, y, r, pct) {
+      ctx.save();
+      ctx.fillStyle = "#fff";
+      ctx.strokeStyle = "#000";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      if (pct >= 87) {
+        ctx.fillStyle = "#000";
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      } else if (pct >= 62) {
+        ctx.fillStyle = "#000";
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#fff";
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.arc(x, y, r, -Math.PI / 2, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (pct >= 37) {
+        ctx.fillStyle = "#000";
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.arc(x, y, r, -Math.PI / 2, Math.PI / 2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (pct >= 12) {
+        ctx.fillStyle = "#000";
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.arc(x, y, r, -Math.PI / 2, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    function drawCalmRing(x, y, r) {
+      ctx.save();
+      ctx.strokeStyle = "#000";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(x, y, r + 6, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+    function drawWindBarb(x, y, r, dirDeg, kt) {
+      if (kt == null || kt < 3) return;
+      const dir = Number.isFinite(dirDeg) ? dirDeg : 0;
+      const shaftLen = 58;
+      let rem = Math.round(kt / 5) * 5;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(dir * Math.PI / 180);
+      ctx.strokeStyle = "#000";
+      ctx.fillStyle = "#000";
+      ctx.lineWidth = 3;
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+      ctx.moveTo(0, -r);
+      ctx.lineTo(0, -(r + shaftLen));
+      ctx.stroke();
+
+      let cursor = -(r + shaftLen);
+      let placedAnything = false;
+
+      while (rem >= 50) {
+        ctx.beginPath();
+        ctx.moveTo(0, cursor);
+        ctx.lineTo(22, cursor - 8); // Outward slant parallel to your 10-knot feathers
+        ctx.lineTo(0, cursor + 8);  // Base down the shaft
+        ctx.closePath();
+        ctx.fill();
+        cursor += 14;
+        rem -= 50;
+        placedAnything = true;
+      }
+      while (rem >= 10) {
+        ctx.beginPath();
+        ctx.moveTo(0, cursor);
+        ctx.lineTo(20, cursor - 8);
+        ctx.stroke();
+        cursor += 10;
+        rem -= 10;
+        placedAnything = true;
+      }
+      if (rem >= 5) {
+        const yPos = placedAnything ? cursor : -(r + shaftLen - 10);
+        ctx.beginPath();
+        ctx.moveTo(0, yPos);
+        ctx.lineTo(12, yPos - 5);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    function buildTimeline(startPast, forecastEnd, nowHour) {
+      timeline = [];
+      for (let t = startPast; t <= forecastEnd; t += HOUR_MS) {
+        timeline.push({ time: t, mode: t <= nowHour ? "observed" : "forecast" });
+      }
+    }
+    function buildPressureTable() {
+      pressureTableBody.innerHTML = "";
+      const observedHours = timeline.filter(entry => entry.time <= floorHour(Date.now()));
+      for (const entry of observedHours) {
+        const rec = observationAt(entry.time);
+        const tr = document.createElement("tr");
+        const pressure = rec?.pressureHpa != null
+          ? `${rec.pressureHpa.toFixed(1)} hPa / ${(rec.pressureHpa / 33.8638866667).toFixed(2)} inHg / ${pressureCodeFromHpa(rec.pressureHpa)}`
+          : "Unavailable";
+        const source = rec ? `station ${stationInfo?.stationIdentifier || ""}`.trim() : "no hourly observation";
+        tr.innerHTML = `<td>${fmtLong(entry.time)}</td><td>${pressure}</td><td>${source}</td>`;
+        pressureTableBody.appendChild(tr);
+      }
+    }
+    async function loadObservationHistory(stationBase, startPast, nowHour, token) {
+      const all = [];
+      const seen = new Set();
+      for (let chunkStart = startPast; chunkStart < nowHour + HOUR_MS; chunkStart += DAY_MS) {
+        if (token !== currentLoadToken) return [];
+        const chunkEnd = Math.min(nowHour + HOUR_MS, chunkStart + DAY_MS);
+        setLoading(`Loading observations ${fmt(chunkStart)} to ${fmt(chunkEnd)}`);
+        const params = new URLSearchParams({
+          start: isoNoMillis(chunkStart - 30 * 60000),
+          end: isoNoMillis(chunkEnd + 30 * 60000),
+          limit: "500"
+        });
+        const url = `${stationBase}/observations?${params.toString()}`;
+        const fc = await fetchJson(url);
+        for (const feature of fc?.features || []) {
+          const key = feature?.id || feature?.properties?.timestamp;
+          if (key && seen.has(key)) continue;
+          if (key) seen.add(key);
+          const rec = obsFeatureToRecord(feature);
+          if (!rec) continue;
+          rec.weatherText = observationWeatherText(rec);
+          rec.cloudTypeText = observationCloudTypeText(rec);
+          all.push(rec);
+        }
+      }
+      all.sort((a, b) => a.timestamp - b.timestamp);
+      return all;
+    }
+    async function loadLocation(loc) {
+      const token = ++currentLoadToken;
+      currentLocation = loc;
+      stopPlayback();
+      slider.disabled = true;
+      stationMeta.textContent = "";
+      searchStatus.textContent = "";
+      setLocationTitle(loc.name);
+      setForecastSource(loc);
+      setLoading("Looking up NWS point");
       clearSuggestions();
-      return;
+      pressureTableBody.innerHTML = "";
+      observations = [];
+      observationHourMap = new Map();
+      timeline = [];
+      hourlyForecast = null;
+      gridForecast = null;
+      stationInfo = null;
+      ctx.clearRect(0, 0, stationCanvas.width, stationCanvas.height);
+
+      try {
+        const point = await fetchJson(`https://api.weather.gov/points/${loc.lat.toFixed(4)},${loc.lon.toFixed(4)}`);
+        if (token !== currentLoadToken) return;
+
+        setLoading("Loading forecast and station list");
+        const [hourly, grid, stationsFc] = await Promise.all([
+          fetchJson(point.properties.forecastHourly),
+          fetchJson(point.properties.forecastGridData),
+          fetchJson(point.properties.observationStations)
+        ]);
+        if (token !== currentLoadToken) return;
+
+        hourlyForecast = hourly;
+        gridForecast = grid;
+        buildForecastHourMap();
+
+        const periods = hourlyForecast?.properties?.periods || [];
+        if (!periods.length) throw new Error("No hourly forecast periods returned.");
+
+        const nowHour = floorHour(Date.now());
+        const forecastEnd = floorHour(Date.parse(periods[periods.length - 1].startTime));
+        const backSpan = Math.max(0, forecastEnd - nowHour);
+        const startPast = nowHour - backSpan;
+
+        const nearest = chooseNearestStation(stationsFc, loc);
+        if (!nearest) throw new Error("No observation stations returned.");
+        stationInfo = {
+          id: nearest.id || nearest.properties?.['@id'] || "",
+          stationIdentifier: nearest.properties?.stationIdentifier || "",
+          name: nearest.properties?.name || ""
+        };
+        stationMeta.textContent = stationInfo.stationIdentifier ? `Nearest Station: ${stationInfo.stationIdentifier}` : "";
+
+        setLoading("Loading station observations");
+        observations = await loadObservationHistory(stationInfo.id, startPast, nowHour, token);
+        if (token !== currentLoadToken) return;
+
+        observationHourMap = buildObservationHourMap(observations, startPast, nowHour);
+        buildTimeline(startPast, forecastEnd, nowHour);
+        buildPressureTable();
+
+        slider.min = 0;
+        slider.max = Math.max(0, timeline.length - 1);
+        slider.step = 1;
+        const nowIndex = timeline.findIndex(entry => entry.time === nowHour);
+        slider.value = nowIndex >= 0 ? nowIndex : Math.floor(timeline.length / 2);
+        slider.disabled = false;
+
+        startLabel.textContent = timeline.length ? fmt(timeline[0].time) : "";
+        endLabel.textContent = timeline.length ? fmt(timeline[timeline.length - 1].time) : "";
+
+        renderByIndex(Number(slider.value));
+        saveLocation(loc);
+        pendingLocation = loc;
+        setLoading("", false);
+      } catch (err) {
+        console.error(err);
+        selectedLabel.textContent = "";
+        startLabel.textContent = "";
+        endLabel.textContent = "";
+        stationMeta.textContent = "";
+        setLoading("Load failed", true);
+        searchStatus.textContent = "Could not load that location.";
+      }
     }
-
-    searchTimer = setTimeout(() => searchAddresses(q), 300);
-  });
-
-  addressInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter"){
-      e.preventDefault();
-      const first = suggestions.querySelector(".suggestion");
-      if (first) first.dispatchEvent(new MouseEvent("mousedown"));
+    function renderByIndex(index) {
+      if (!timeline.length) return;
+      const i = Math.max(0, Math.min(timeline.length - 1, Number(index) || 0));
+      slider.value = i;
+      renderHour(timeline[i].time);
     }
-  });
+    function renderHour(hour) {
+      const obsRec = observationAt(hour);
+      const period = forecastPeriodAt(hour);
+      const useObs = !!obsRec && hour <= floorHour(Date.now());
 
-  document.addEventListener("click", (e) => {
-    if (!e.target.closest(".searchWrap")) clearSuggestions();
-  });
+      const temp = useObs ? obsRec.temperatureF : (period?.temperature ?? cToF(gridValue(layer("temperature"), hour)));
+      const rh = useObs ? obsRec.relativeHumidity : (period?.relativeHumidity?.value ?? gridValue(layer("relativeHumidity"), hour));
+      const dpC = useObs ? null : (period?.dewpoint?.value ?? gridValue(layer("dewpoint"), hour));
+      const dewpoint = useObs ? obsRec.dewpointF : (dpC != null ? cToF(dpC) : dewpointFromTRH(temp, rh));
+      const windKt = useObs ? obsRec.windKt : (gridWindKt(hour) ?? parseSpeedKt(period?.windSpeed));
+      const windDir = useObs ? (obsRec.windDirection ?? 0) : (gridWindDeg(hour) ?? degFromCardinal(period?.windDirection) ?? 0);
+      const visibility = useObs
+        ? (obsRec.visibilityMi == null ? "" : obsRec.visibilityMi.toFixed(1).replace(/\.0$/, ""))
+        : (() => {
+          const visM = gridValue(layer("visibility"), hour);
+          return visM == null ? "" : (visM / 1609.344).toFixed(1).replace(/\.0$/, "");
+        })();
+      const pressureHpa = pressureHpaAt(hour);
+      const pressureCode = pressureCodeFromHpa(pressureHpa);
+      const trend = pressureTrendAt(hour);
+      const precip = useObs ? "" : precipInches3h(hour);
+      const skyPct = skyCoverPct(period, hour, obsRec);
 
-  loadBtn.addEventListener("click", () => {
-    if (!pendingLocation){
-      searchStatus.textContent = "Choose a result from the search list first.";
-      return;
+      const weatherText = useObs ? obsRec.weatherText : normalizeText(period?.shortForecast || "");
+      const cloudTypeText = useObs ? obsRec.cloudTypeText : normalizeText(period?.detailedForecast || period?.shortForecast || "");
+      const weatherSprite = chooseWeatherSpriteFromText(weatherText);
+      const cloudSprite = chooseCloudSpriteFromText(cloudTypeText);
+
+      selectedLabel.textContent = `${fmt(hour)}${useObs ? " • Observed" : " • Forecast"}`;
+
+      ctx.clearRect(0, 0, stationCanvas.width, stationCanvas.height);
+
+      drawText(temp ?? "", 60, 85, 24, "left");
+      drawText(dewpoint ?? "", 60, 210, 24, "left");
+      drawText(visibility, 28, 145, 20, "right");
+      drawText(pressureCode, 238, 85, 24, "left");
+      drawTrendSymbol(205, 140, trend.trend);
+      drawText(trend.num, 234, 145, 18, "left");
+      drawText(precip, 220, 210, 18, "left");
+
+      drawWindBarb(160, 130, 18, windDir, windKt);
+      drawSkyCover(160, 130, 18, skyPct);
+      if (windKt == null || windKt < 3) drawCalmRing(160, 130, 18);
+
+      drawSprite(ctx, "presentWeather", weatherSprite, 108, 128, 1.1);
+
+      drawSprite(ctx, "cloudType", cloudSprite, 160, 178, 1.0);
+
+      stationMeta.textContent = stationInfo?.stationIdentifier
+        ? `Nearest Station: ${stationInfo.stationIdentifier}`
+        : "";
     }
-    loadLocation(pendingLocation);
-  });
-}
-function init(){
-  initSearch();
-  const saved = getSavedLocation() || DEFAULT_LOCATION;
-  addressInput.value = saved.name;
-  setLocationTitle(saved.name);
-  loadLocation(saved);
-}
-slider.addEventListener("input", e => {
-  if (hourlyForecast) render(+e.target.value);
-});
-window.addEventListener("load", init);
-</script>
-
+    function stopPlayback() {
+      if (playbackTimer) {
+        clearInterval(playbackTimer);
+        playbackTimer = null;
+      }
+      playPauseBtn.textContent = "Animate";
+      document.querySelectorAll(".controls button").forEach(btn => btn.classList.remove("active"));
+    }
+    function startPlayback(dir, intervalMs) {
+      lastPlaybackMode = { dir, intervalMs };
+      stopPlayback();
+      if (!timeline.length) return;
+      const activeBtn = dir < 0
+        ? (intervalMs < 1000 ? backFastBtn : backBtn)
+        : (intervalMs < 1000 ? forwardFastBtn : forwardBtn);
+      activeBtn.classList.add("active");
+      playPauseBtn.textContent = "Pause";
+      playbackTimer = setInterval(() => {
+        const next = Number(slider.value) + dir;
+        if (next < Number(slider.min) || next > Number(slider.max)) {
+          stopPlayback();
+          return;
+        }
+        renderByIndex(next);
+      }, intervalMs);
+    }
+    function initPlayback() {
+      playPauseBtn.addEventListener("click", () => {
+        if (playbackTimer) stopPlayback();
+        else startPlayback(lastPlaybackMode.dir, lastPlaybackMode.intervalMs);
+      });
+      backBtn.addEventListener("click", () => startPlayback(-1, 1000));
+      backFastBtn.addEventListener("click", () => startPlayback(-1, 250));
+      forwardBtn.addEventListener("click", () => startPlayback(1, 1000));
+      forwardFastBtn.addEventListener("click", () => startPlayback(1, 250));
+    }
+    function initSearch() {
+      addressInput.addEventListener("input", () => {
+        pendingLocation = null;
+        searchStatus.textContent = "";
+        const q = addressInput.value.trim();
+        if (searchTimer) clearTimeout(searchTimer);
+        if (q.length < 3) {
+          clearSuggestions();
+          return;
+        }
+        searchTimer = setTimeout(() => searchAddresses(q), 300);
+      });
+      addressInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          const first = suggestions.querySelector(".suggestion");
+          if (first) first.dispatchEvent(new MouseEvent("mousedown"));
+        }
+      });
+      document.addEventListener("click", (e) => {
+        if (!e.target.closest(".searchWrap")) clearSuggestions();
+      });
+      loadBtn.addEventListener("click", () => {
+        if (!pendingLocation) {
+          searchStatus.textContent = "Choose a result from the search list first.";
+          return;
+        }
+        loadLocation(pendingLocation);
+      });
+    }
+    function init() {
+      initSearch();
+      initPlayback();
+      slider.addEventListener("input", e => {
+        stopPlayback();
+        renderByIndex(Number(e.target.value));
+      });
+      const saved = getSavedLocation() || DEFAULT_LOCATION;
+      addressInput.value = saved.name;
+      pendingLocation = saved;
+      setLocationTitle(saved.name);
+      setForecastSource(saved);
+      loadLocation(saved);
+    }
+    window.addEventListener("load", init);
+  </script>
 </body>
+
 </html>
